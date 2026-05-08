@@ -1,6 +1,14 @@
 import { spawn, spawnSync } from "node:child_process";
 
 import {
+  createInitialContext,
+  processKeystroke,
+  TextBuffer,
+  type CursorPosition,
+  type VimAction,
+  type VimContext,
+} from "@vimee/core";
+import {
   CustomEditor,
   type ExtensionAPI,
 } from "@mariozechner/pi-coding-agent";
@@ -529,6 +537,12 @@ class ClipboardMirror {
 }
 
 export class ModalEditor extends CustomEditor {
+  static [Symbol.hasInstance](instance: unknown): boolean {
+    if (typeof instance !== "object" || instance === null) return false;
+    return Object.prototype.isPrototypeOf.call(ModalEditor.prototype, instance)
+      || (instance as { __piVimModalEditorBrand?: boolean }).__piVimModalEditorBrand === true;
+  }
+
   private mode: Mode = "insert";
   private pendingMotion: PendingMotion = null;
   private pendingTextObject: TextObjectKind | null = null;
@@ -3063,6 +3077,266 @@ export class ModalEditor extends CustomEditor {
   }
 }
 
+function clampVimeeCursor(cursor: CursorPosition, lines: string[]): CursorPosition {
+  const line = Math.max(0, Math.min(cursor.line, Math.max(0, lines.length - 1)));
+  const col = Math.max(0, Math.min(cursor.col, lines[line]?.length ?? 0));
+  return { line, col };
+}
+
+function normalizeVimeeKey(data: string): { key: string; ctrlKey: boolean } | null {
+  if (matchesKey(data, "escape") || matchesKey(data, "ctrl+[")) return { key: "Escape", ctrlKey: false };
+  if (matchesKey(data, "enter") || data === "\r" || data === "\n") return { key: "Enter", ctrlKey: false };
+  if (matchesKey(data, "backspace") || data === "\x7f" || data === "\b") return { key: "Backspace", ctrlKey: false };
+  if (matchesKey(data, "delete") || data === "\x1b[3~") return { key: "Delete", ctrlKey: false };
+  if (matchesKey(data, "tab") || data === "\t") return { key: "Tab", ctrlKey: false };
+  if (data === CTRL_R) return { key: "r", ctrlKey: true };
+  if (data === "\x16") return { key: "v", ctrlKey: true };
+  if (data === "\x17") return { key: "w", ctrlKey: true };
+  if (data === "\x04") return { key: "d", ctrlKey: true };
+  if (data.length === 1 && data >= " " && data !== "\x7f") return { key: data, ctrlKey: false };
+  return null;
+}
+
+class VimeeModalEditor extends CustomEditor {
+  readonly __piVimModalEditorBrand = true;
+
+  private buffer: TextBuffer;
+  private vim: VimContext;
+  private readonly labelColorizers: ModeLabelColorizers | null;
+  private readonly cursorShapeRuntime: CursorShapeRuntime | null;
+  private lastCursorShapeSequence: CursorShapeSequence | null = null;
+  private insertSessionUndoSaved: boolean = false;
+  private unnamedRegister: string = "";
+  private clipboardMirrorPolicy: ClipboardMirrorPolicy = DEFAULT_CLIPBOARD_MIRROR_POLICY;
+  private readonly clipboardMirror = new ClipboardMirror(writeClipboardInChildProcess);
+  private quitFn: () => void = () => {};
+  private notifyFn: (message: string) => void = () => {};
+
+  constructor(
+    tui: CustomEditorConstructorArgs[0],
+    theme: CustomEditorConstructorArgs[1],
+    kb: CustomEditorConstructorArgs[2],
+    labelColorizers?: ModeLabelColorizers | null,
+  ) {
+    super(tui, theme, kb);
+    this.buffer = new TextBuffer(this.getText());
+    this.vim = createInitialContext(this.getCursor());
+    this.labelColorizers = labelColorizers ?? null;
+    this.cursorShapeRuntime = getCursorShapeRuntime(tui);
+  }
+
+  setClipboardMirrorPolicy(policy: ClipboardMirrorPolicy): void {
+    this.clipboardMirrorPolicy = policy;
+  }
+
+  getClipboardMirrorPolicy(): ClipboardMirrorPolicy {
+    return this.clipboardMirrorPolicy;
+  }
+
+  setQuitFn(fn: () => void): void { this.quitFn = fn; }
+  setNotifyFn(fn: (message: string) => void): void { this.notifyFn = fn; }
+  getMode(): Mode { return this.vim.mode === "insert" ? "insert" : "normal"; }
+  getRegister(): string { return this.unnamedRegister || this.vim.register; }
+  setRegister(text: string): void {
+    this.unnamedRegister = text;
+    this.vim = { ...this.vim, register: text };
+  }
+
+  override setText(text: string): void {
+    super.setText(text);
+    this.buffer = new TextBuffer(this.getText());
+    this.vim = createInitialContext(this.getCursor());
+  }
+
+  private syncVimeeFromBase(): void {
+    const text = this.getText();
+    if (this.buffer.getContent() !== text) {
+      this.buffer.replaceContent(text);
+    }
+    const cursor = clampVimeeCursor(this.getCursor(), this.getLines());
+    this.vim = { ...this.vim, cursor };
+  }
+
+  private syncBaseFromVimee(): void {
+    const editor = this as unknown as ModalEditorInternals;
+    if (!editor.state || !Array.isArray(editor.state.lines)) return;
+
+    const text = this.buffer.getContent();
+    const lines = text.split("\n");
+    const cursor = clampVimeeCursor(this.vim.cursor, lines);
+    editor.state.lines = lines.length > 0 ? lines : [""];
+    editor.state.cursorLine = cursor.line;
+    if (typeof editor.setCursorCol === "function") {
+      editor.setCursorCol(cursor.col);
+    } else {
+      editor.state.cursorCol = cursor.col;
+      editor.preferredVisualCol = null;
+    }
+    editor.onChange?.(this.getText());
+    editor.tui?.requestRender?.();
+  }
+
+  private ensureInsertUndoPoint(): void {
+    if (this.insertSessionUndoSaved) return;
+    this.syncVimeeFromBase();
+    this.buffer.saveUndoPoint(this.vim.cursor);
+    this.insertSessionUndoSaved = true;
+  }
+
+  private processVimeeKey(key: string, ctrlKey = false): void {
+    this.syncVimeeFromBase();
+    const previousMode = this.vim.mode;
+    const result = processKeystroke(key, this.vim, this.buffer, ctrlKey);
+    this.vim = result.newCtx;
+    if (previousMode === "insert" && this.vim.mode !== "insert") {
+      this.insertSessionUndoSaved = false;
+    }
+    this.handleVimeeActions(result.actions);
+    this.syncBaseFromVimee();
+  }
+
+  private handleVimeeActions(actions: VimAction[]): void {
+    for (const action of actions) {
+      switch (action.type) {
+        case "yank":
+        case "register-write":
+          this.recordRegisterWrite(action.text, action.type === "yank" ? "yank" : "mutation");
+          break;
+        case "quit":
+          if (action.force || this.getText().trim().length === 0) {
+            this.quitFn();
+          } else {
+            this.notifyFn("Prompt is not empty; use :q! to quit");
+          }
+          break;
+        default:
+          break;
+      }
+    }
+  }
+
+  private recordRegisterWrite(text: string, source: RegisterWriteSource): void {
+    this.unnamedRegister = text;
+    this.vim = { ...this.vim, register: text };
+    const shouldMirror = this.clipboardMirrorPolicy === "all"
+      || (this.clipboardMirrorPolicy === "yank" && source === "yank");
+    if (shouldMirror && text.length > 0) {
+      this.clipboardMirror.mirror(text);
+    }
+  }
+
+  override handleInput(data: string): void {
+    const normalized = normalizeVimeeKey(data);
+
+    if (this.vim.mode === "insert") {
+      if (normalized?.key === "Escape") {
+        this.processVimeeKey("Escape");
+        return;
+      }
+
+      // Preserve Pi's base editor behavior in Insert mode, including the `/` and
+      // `@` autocomplete popups. vimee owns modal state; the base editor owns
+      // text entry and popup-triggering printable input.
+      this.ensureInsertUndoPoint();
+      super.handleInput(data);
+      this.syncVimeeFromBase();
+      return;
+    }
+
+    if (!normalized) {
+      super.handleInput(data);
+      this.syncVimeeFromBase();
+      return;
+    }
+
+    if (normalized.key === "Escape" && this.vim.mode === "normal" && this.vim.phase === "idle") {
+      super.handleInput(data);
+      this.syncVimeeFromBase();
+      return;
+    }
+
+    this.processVimeeKey(normalized.key, normalized.ctrlKey);
+  }
+
+  private getDesiredCursorShapeSequence(): CursorShapeSequence {
+    return this.vim.mode === "insert" ? INSERT_CURSOR_SHAPE : BLOCK_CURSOR_SHAPE;
+  }
+
+  private hasPromptCursorMarker(lines: string[]): boolean {
+    return lines.some((line) => line.includes(CURSOR_MARKER));
+  }
+
+  private syncCursorShapeForRender(lines: string[]): void {
+    if (!this.cursorShapeRuntime) return;
+    if (!this.hasPromptCursorMarker(lines)) return;
+
+    if (this.cursorShapeRuntime.getShowHardwareCursor?.() === false) {
+      this.lastCursorShapeSequence = null;
+      return;
+    }
+
+    // When hardware cursor support is available, remove the base editor's
+    // reverse-video software cursor in every mode. Otherwise insert mode would
+    // still look like a block despite emitting the DECSCUSR vertical-bar shape.
+    this.stripSoftwareCursorWhenHardwareCursorIsUsed(lines);
+
+    const sequence = this.getDesiredCursorShapeSequence();
+    if (sequence === this.lastCursorShapeSequence) return;
+    this.cursorShapeRuntime.writeCursorShape(sequence);
+    this.lastCursorShapeSequence = sequence;
+  }
+
+  private stripSoftwareCursorWhenHardwareCursorIsUsed(lines: string[]): void {
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i];
+      if (!line?.includes(CURSOR_MARKER)) continue;
+
+      lines[i] = stripSoftwareCursorAfterMarker(line);
+      return;
+    }
+  }
+
+  override render(width: number): string[] {
+    const lines = super.render(width);
+    this.syncCursorShapeForRender(lines);
+    if (lines.length === 0) return lines;
+
+    const rawLabel = this.fitModeLabel(this.getModeLabel(), width);
+    const colorize = this.getModeLabelColorizer();
+    const label = colorize ? colorize(rawLabel) : rawLabel;
+    const last = lines.length - 1;
+    const lastLine = lines[last];
+    if (lastLine && visibleWidth(lastLine) >= visibleWidth(rawLabel)) {
+      lines[last] = truncateToWidth(lastLine, width - visibleWidth(rawLabel), "") + label;
+    } else {
+      lines[last] = label;
+    }
+    return lines;
+  }
+
+  private fitModeLabel(label: string, width: number): string {
+    if (width <= 0) return "";
+    return visibleWidth(label) <= width ? label : truncateToWidth(label, width, "");
+  }
+
+  private getModeLabelColorizer(): ((s: string) => string) | null {
+    if (!this.labelColorizers) return null;
+    if (this.vim.mode === "command-line") return this.labelColorizers.ex;
+    return this.vim.mode === "insert" ? this.labelColorizers.insert : this.labelColorizers.normal;
+  }
+
+  private getModeLabel(): string {
+    if (this.vim.mode === "insert") return " INSERT ";
+    if (this.vim.mode === "command-line") {
+      return ` ${this.vim.commandType ?? ":"}${this.vim.commandBuffer}_ `;
+    }
+    const prefix = this.vim.count > 0 ? `${this.vim.count}` : "";
+    const pending = this.vim.phase !== "idle" ? ` ${this.vim.phase}` : "";
+    const visual = this.vim.mode.startsWith("visual") ? ` ${this.vim.mode.toUpperCase()} ` : " NORMAL ";
+    return prefix || pending ? `${visual}${prefix}${pending} ` : visual;
+  }
+}
+
 export default function (pi: ExtensionAPI) {
   let cursorShapeCleanup: CursorShapeCleanup | null = null;
 
@@ -3082,7 +3356,7 @@ export default function (pi: ExtensionAPI) {
     } : null;
     ctx.ui.setEditorComponent((tui, theme, kb) => {
       cursorShapeCleanup = enableCursorShapeSupport(tui);
-      const editor = new ModalEditor(tui, theme, kb, colorizers);
+      const editor = new VimeeModalEditor(tui, theme, kb, colorizers);
       editor.setClipboardMirrorPolicy(clipboardMirrorPolicy.policy);
       editor.setQuitFn(() => ctx.shutdown());
       editor.setNotifyFn((message) => ctx.ui.notify(message, "warning"));
