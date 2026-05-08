@@ -2,9 +2,7 @@
   "lastChangelogVersion": "0.74.0",
   "defaultProvider": "openai-codex",
   "defaultModel": "gpt-5.5",
-  "extensions": [
-    "/home/drew/.pi/agent/vendor/pi-vim"
-  ],
+  "extensions": [],
   "npmCommand": [
     "npm",
     "--prefix",
@@ -15,7 +13,8 @@
   "defaultThinkingLevel": "medium",
   "packages": [
     "npm:pi-web-access",
-    "npm:pi-ask-user"
+    "npm:pi-ask-user",
+    "npm:@bizmythy/pi-vim"
   ],
   "theme": "dark"
 }
