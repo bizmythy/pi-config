@@ -1,0 +1,9 @@
+# authentication
+agent/auth.json
+# session logs
+agent/sessions/
+
+# Common local-only files.
+.env
+.env.*
+*.log
