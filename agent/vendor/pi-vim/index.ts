@@ -3083,6 +3083,14 @@ function clampVimeeCursor(cursor: CursorPosition, lines: string[]): CursorPositi
   return { line, col };
 }
 
+function createInitialInsertContext(cursor: CursorPosition): VimContext {
+  return {
+    ...createInitialContext(cursor),
+    mode: "insert",
+    statusMessage: "-- INSERT --",
+  };
+}
+
 function normalizeVimeeKey(data: string): { key: string; ctrlKey: boolean } | null {
   if (matchesKey(data, "escape") || matchesKey(data, "ctrl+[")) return { key: "Escape", ctrlKey: false };
   if (matchesKey(data, "enter") || data === "\r" || data === "\n") return { key: "Enter", ctrlKey: false };
@@ -3120,7 +3128,7 @@ class VimeeModalEditor extends CustomEditor {
   ) {
     super(tui, theme, kb);
     this.buffer = new TextBuffer(this.getText());
-    this.vim = createInitialContext(this.getCursor());
+    this.vim = createInitialInsertContext(this.getCursor());
     this.labelColorizers = labelColorizers ?? null;
     this.cursorShapeRuntime = getCursorShapeRuntime(tui);
   }
@@ -3145,7 +3153,7 @@ class VimeeModalEditor extends CustomEditor {
   override setText(text: string): void {
     super.setText(text);
     this.buffer = new TextBuffer(this.getText());
-    this.vim = createInitialContext(this.getCursor());
+    this.vim = createInitialInsertContext(this.getCursor());
   }
 
   private syncVimeeFromBase(): void {
