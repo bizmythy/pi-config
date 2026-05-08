@@ -1,4 +1,4 @@
 # Guidance
 
-- Use `gh` for GitHub operations.
+- Use the `github` skill for GitHub operations.
 
