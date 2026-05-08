@@ -7,3 +7,7 @@ agent/sessions/
 .env
 .env.*
 *.log
+
+# Pi npm package install/cache directories.
+npm/
+npm-cache/

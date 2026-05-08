@@ -5,5 +5,15 @@
   "extensions": [
     "/home/drew/.pi/agent/vendor/pi-vim"
   ],
-  "defaultThinkingLevel": "low"
+  "npmCommand": [
+    "npm",
+    "--prefix",
+    "/home/drew/.pi/npm",
+    "--cache",
+    "/home/drew/.pi/npm-cache"
+  ],
+  "defaultThinkingLevel": "low",
+  "packages": [
+    "npm:pi-web-access"
+  ]
 }
