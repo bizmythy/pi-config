@@ -98,6 +98,7 @@ type ModalEditorInternals = {
   preferredVisualCol?: number | null;
   lastAction?: string | null;
   historyIndex?: number;
+  scrollOffset?: number;
   onChange?: (text: string) => void;
   tui?: { requestRender?: () => void };
   pushUndoSnapshot?: () => void;
@@ -132,6 +133,13 @@ type CursorShapeTuiCandidate = {
   terminal?: { write?: unknown };
   setShowHardwareCursor?: unknown;
   getShowHardwareCursor?: unknown;
+};
+
+type VisualHighlightRange = { start: number; end: number };
+type LayoutSpan = {
+  logicalLine: number;
+  startCol: number;
+  endCol: number;
 };
 
 function getCursorShapeRuntime(tui: unknown): CursorShapeRuntime | null {
@@ -3307,6 +3315,7 @@ class VimeeModalEditor extends CustomEditor {
   override render(width: number): string[] {
     const lines = super.render(width);
     this.syncCursorShapeForRender(lines);
+    this.applyVisualHighlights(lines, width);
     if (lines.length === 0) return lines;
 
     const rawLabel = this.fitModeLabel(this.getModeLabel(), width);
@@ -3320,6 +3329,176 @@ class VimeeModalEditor extends CustomEditor {
       lines[last] = label;
     }
     return lines;
+  }
+
+  private applyVisualHighlights(renderedLines: string[], width: number): void {
+    if (!this.vim.mode.startsWith("visual")) return;
+    if (!this.vim.visualAnchor) return;
+    if (renderedLines.length <= 2) return;
+
+    const layoutWidth = this.getEditorLayoutWidth(width);
+    const spans = this.buildLayoutSpans(layoutWidth);
+    const editor = this as unknown as ModalEditorInternals;
+    const scrollOffset = Math.max(0, editor.scrollOffset ?? 0);
+    const visibleSpanCount = Math.min(spans.length - scrollOffset, renderedLines.length - 2);
+    const paddingX = this.getEffectivePaddingX(width);
+
+    for (let i = 0; i < visibleSpanCount; i++) {
+      const span = spans[scrollOffset + i];
+      if (!span) continue;
+
+      const highlight = this.getVisualHighlightForSpan(span);
+      if (!highlight || highlight.start >= highlight.end) continue;
+
+      const renderedIndex = i + 1;
+      const rendered = renderedLines[renderedIndex];
+      if (rendered === undefined) continue;
+
+      renderedLines[renderedIndex] = this.highlightRenderedContent(
+        rendered,
+        paddingX,
+        highlight.start - span.startCol,
+        highlight.end - span.startCol,
+      );
+    }
+  }
+
+  private getEffectivePaddingX(width: number): number {
+    const maxPadding = Math.max(0, Math.floor((width - 1) / 2));
+    return Math.min(this.getPaddingX(), maxPadding);
+  }
+
+  private getEditorLayoutWidth(width: number): number {
+    const paddingX = this.getEffectivePaddingX(width);
+    const contentWidth = Math.max(1, width - paddingX * 2);
+    return Math.max(1, contentWidth - (paddingX ? 0 : 1));
+  }
+
+  private buildLayoutSpans(layoutWidth: number): LayoutSpan[] {
+    const spans: LayoutSpan[] = [];
+    const lines = this.getLines();
+    if (lines.length === 0 || (lines.length === 1 && lines[0] === "")) {
+      return [{ logicalLine: 0, startCol: 0, endCol: 0 }];
+    }
+
+    for (let logicalLine = 0; logicalLine < lines.length; logicalLine++) {
+      const line = lines[logicalLine] ?? "";
+      if (visibleWidth(line) <= layoutWidth) {
+        spans.push({ logicalLine, startCol: 0, endCol: line.length });
+        continue;
+      }
+
+      for (const chunk of this.wrapLineForHighlighting(line, layoutWidth)) {
+        spans.push({ logicalLine, startCol: chunk.start, endCol: chunk.end });
+      }
+    }
+    return spans;
+  }
+
+  private wrapLineForHighlighting(line: string, maxWidth: number): Array<{ start: number; end: number }> {
+    const chunks: Array<{ start: number; end: number }> = [];
+    let start = 0;
+    let currentWidth = 0;
+    const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+
+    for (const { segment, index } of segmenter.segment(line)) {
+      const width = Math.max(1, visibleWidth(segment));
+      if (currentWidth > 0 && currentWidth + width > maxWidth) {
+        chunks.push({ start, end: index });
+        start = index;
+        currentWidth = 0;
+      }
+      currentWidth += width;
+    }
+
+    chunks.push({ start, end: line.length });
+    return chunks;
+  }
+
+  private getVisualHighlightForSpan(span: LayoutSpan): VisualHighlightRange | null {
+    const anchor = this.vim.visualAnchor;
+    if (!anchor) return null;
+
+    const cursor = this.vim.cursor;
+    const lineText = this.getLines()[span.logicalLine] ?? "";
+
+    if (this.vim.mode === "visual-line") {
+      const startLine = Math.min(anchor.line, cursor.line);
+      const endLine = Math.max(anchor.line, cursor.line);
+      if (span.logicalLine < startLine || span.logicalLine > endLine) return null;
+      return {
+        start: span.startCol,
+        end: Math.max(span.endCol, span.startCol + Math.min(1, lineText.length)),
+      };
+    }
+
+    if (this.vim.mode === "visual-block") {
+      const startLine = Math.min(anchor.line, cursor.line);
+      const endLine = Math.max(anchor.line, cursor.line);
+      if (span.logicalLine < startLine || span.logicalLine > endLine) return null;
+      const startCol = Math.min(anchor.col, cursor.col);
+      const endCol = Math.max(anchor.col, cursor.col) + 1;
+      return this.intersectRange(span, { start: startCol, end: Math.min(endCol, lineText.length) });
+    }
+
+    const start = this.compareCursor(anchor, cursor) <= 0 ? anchor : cursor;
+    const end = start === anchor ? cursor : anchor;
+    if (span.logicalLine < start.line || span.logicalLine > end.line) return null;
+
+    const lineStart = span.logicalLine === start.line ? start.col : 0;
+    const lineEnd = span.logicalLine === end.line ? end.col + 1 : lineText.length;
+    return this.intersectRange(span, {
+      start: Math.min(lineStart, lineText.length),
+      end: Math.min(lineEnd, lineText.length),
+    });
+  }
+
+  private intersectRange(span: LayoutSpan, range: VisualHighlightRange): VisualHighlightRange | null {
+    const start = Math.max(span.startCol, range.start);
+    const end = Math.min(span.endCol, range.end);
+    return start < end ? { start, end } : null;
+  }
+
+  private compareCursor(a: CursorPosition, b: CursorPosition): number {
+    if (a.line !== b.line) return a.line - b.line;
+    return a.col - b.col;
+  }
+
+  private highlightRenderedContent(
+    line: string,
+    paddingX: number,
+    highlightStart: number,
+    highlightEnd: number,
+  ): string {
+    if (highlightStart >= highlightEnd) return line;
+
+    const contentStart = this.findRawIndexForPlainOffset(line, paddingX);
+    const rawStart = this.findRawIndexForPlainOffset(line, paddingX + highlightStart);
+    const rawEnd = this.findRawIndexForPlainOffset(line, paddingX + highlightEnd);
+    if (rawStart < contentStart || rawStart >= rawEnd) return line;
+
+    return `${line.slice(0, rawStart)}\x1b[7m${line.slice(rawStart, rawEnd)}\x1b[27m${line.slice(rawEnd)}`;
+  }
+
+  private findRawIndexForPlainOffset(line: string, targetOffset: number): number {
+    let plainOffset = 0;
+    for (let rawIndex = 0; rawIndex < line.length;) {
+      if (line.startsWith(CURSOR_MARKER, rawIndex)) {
+        rawIndex += CURSOR_MARKER.length;
+        continue;
+      }
+      if (line[rawIndex] === "\x1b") {
+        const end = line.indexOf("m", rawIndex + 1);
+        if (end !== -1) {
+          rawIndex = end + 1;
+          continue;
+        }
+      }
+      if (plainOffset >= targetOffset) return rawIndex;
+      rawIndex++;
+      plainOffset++;
+    }
+    return line.length;
   }
 
   private fitModeLabel(label: string, width: number): string {
