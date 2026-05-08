@@ -16,5 +16,5 @@
     "npm:pi-ask-user",
     "npm:@bizmythy/pi-vim"
   ],
-  "theme": "dark"
+  "theme": "catppuccin-mocha"
 }
