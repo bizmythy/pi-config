@@ -4,5 +4,6 @@
   "defaultModel": "gpt-5.5",
   "extensions": [
     "/home/drew/.pi/agent/vendor/pi-vim"
-  ]
+  ],
+  "defaultThinkingLevel": "low"
 }
