@@ -12,8 +12,10 @@
     "--cache",
     "/home/drew/.pi/npm-cache"
   ],
-  "defaultThinkingLevel": "low",
+  "defaultThinkingLevel": "medium",
   "packages": [
-    "npm:pi-web-access"
-  ]
+    "npm:pi-web-access",
+    "npm:pi-ask-user"
+  ],
+  "theme": "dark"
 }
