@@ -3,8 +3,10 @@
   "defaultProvider": "openai-codex",
   "defaultModel": "gpt-5.5",
   "extensions": [],
-  "npmCommand": ["pi-npm"],
-  "defaultThinkingLevel": "medium",
+  "npmCommand": [
+    "pi-npm"
+  ],
+  "defaultThinkingLevel": "low",
   "packages": [
     "npm:pi-web-access",
     "npm:pi-ask-user",
