@@ -3,13 +3,7 @@
   "defaultProvider": "openai-codex",
   "defaultModel": "gpt-5.5",
   "extensions": [],
-  "npmCommand": [
-    "npm",
-    "--prefix",
-    "/home/drew/.pi/npm",
-    "--cache",
-    "/home/drew/.pi/npm-cache"
-  ],
+  "npmCommand": ["pi-npm"],
   "defaultThinkingLevel": "medium",
   "packages": [
     "npm:pi-web-access",
