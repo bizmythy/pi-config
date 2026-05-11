@@ -1,0 +1,14 @@
+{
+  "settings": {
+    "autoAuth": true,
+    "idleTimeout": 10
+  },
+  "mcpServers": {
+    "linear": {
+      "url": "https://mcp.linear.app/mcp",
+      "auth": "oauth",
+      "lifecycle": "lazy",
+      "directTools": true
+    }
+  }
+}
