@@ -11,7 +11,7 @@
     "npm:pi-web-access",
     "npm:pi-ask-user",
     "npm:@bizmythy/pi-vim",
-    "npm:pi-mcp-adapter"
+    "../npm/node_modules/pi-mcp-adapter"
   ],
   "theme": "catppuccin-mocha"
 }

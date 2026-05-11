@@ -1,7 +1,8 @@
 {
   "settings": {
     "autoAuth": true,
-    "idleTimeout": 10
+    "idleTimeout": 10,
+    "hideStatusBar": true
   },
   "mcpServers": {
     "linear": {

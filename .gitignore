@@ -9,7 +9,9 @@ agent/sessions/
 *.log
 
 # Pi package install/cache directories.
-npm/
+npm/*
+!npm/package.json
+!npm/package-lock.json
 npm-cache/
 agent/git/
 agent/mcp-cache.json
