@@ -12,3 +12,6 @@ agent/sessions/
 npm/
 npm-cache/
 agent/git/
+agent/mcp-cache.json
+agent/mcp-onboarding.json
+agent/mcp-oauth/
