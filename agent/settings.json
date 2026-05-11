@@ -6,12 +6,13 @@
   "npmCommand": [
     "pi-npm"
   ],
-  "defaultThinkingLevel": "medium",
+  "defaultThinkingLevel": "low",
   "packages": [
     "npm:pi-web-access",
     "npm:pi-ask-user",
     "../npm/node_modules/pi-vim",
-    "../npm/node_modules/pi-mcp-adapter"
+    "../npm/node_modules/pi-mcp-adapter",
+    "npm:pi-subagents"
   ],
   "theme": "catppuccin-mocha"
 }
