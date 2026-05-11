@@ -1,3 +1,4 @@
 {
+  "app.interrupt": "ctrl+c",
   "app.session.toggleNamedFilter": "ctrl+shift+n"
 }
