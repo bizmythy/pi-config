@@ -10,7 +10,7 @@
   "packages": [
     "npm:pi-web-access",
     "npm:pi-ask-user",
-    "npm:@bizmythy/pi-vim",
+    "../npm/node_modules/pi-vim",
     "../npm/node_modules/pi-mcp-adapter"
   ],
   "theme": "catppuccin-mocha"

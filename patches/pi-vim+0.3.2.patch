@@ -1,0 +1,2936 @@
+diff --git a/node_modules/pi-vim/README.md b/node_modules/pi-vim/README.md
+index 807884e..906c399 100644
+--- a/node_modules/pi-vim/README.md
++++ b/node_modules/pi-vim/README.md
+@@ -2,10 +2,6 @@
+ 
+ Modal vim-like editing for Pi's input prompt. Covers the high-frequency 90% command surface.
+ 
+-## why
+-
+-You love Pi, you love Vim, you'll love pi-vim.
+-
+ ## install
+ 
+ ```bash
+@@ -14,9 +10,39 @@ pi install npm:pi-vim
+ 
+ Restart Pi after install.
+ 
++## configure
++
++pi-vim reads persistent Pi settings from `~/.pi/agent/settings.json` and project `.pi/settings.json`.
++
++Clipboard write mirroring is controlled by `piVim.clipboardMirror`:
++
++```json
++{
++  "piVim": {
++    "clipboardMirror": "all"
++  }
++}
++```
++
++| value | behavior |
++|-------|----------|
++| `all` | Mirror every unnamed-register write (default/current behavior) |
++| `yank` | Mirror yanks only; deletes/changes update only pi-vim's internal register |
++| `never` | Never mirror register writes to the OS clipboard |
++
++The setting controls write mirroring only. `p` / `P` keep the paste policy documented below.
++
++## contributor setup
++
++Hooks install with `npm install` after cloning. To wire them explicitly:
++
++```bash
++npm run hooks:install
++```
++
+ ## stats
+ 
+-- **112 commands**: motions, operators, counts, text objects, undo/redo
++- **188 commands**: motions, operators, counts, text objects, undo/redo, ex quit
+ - **sub-µs word motions** via precomputed boundary cache (~4ms startup, ~150KB memory)
+ - **0 dependencies**
+ 
+@@ -33,22 +59,19 @@ u          # undo
+ 2}         # jump two paragraphs forward
+ ```
+ 
+-Mode indicator (`INSERT` / `NORMAL`) appears at bottom-right.
+-Its label is theme-colored: reverse-video `borderMuted` for
+-INSERT, `borderAccent` for NORMAL.
++Mode indicator (`INSERT` / `NORMAL` / `EX`) appears bottom-right, theme-colored.
++
++Requires `@mariozechner/pi-tui >= 0.47.0`. With `pi-tui >= 0.49.3` and DECSCUSR support, cursor shape follows mode; otherwise software cursor remains.
+ 
+ ## why pi-vim
+ 
+ - Fast modal editing without leaving Pi.
+ - Count-aware motions/operators (`2dw`, `3G`, `d2j`, `2}`).
+-- Strong REPL-focused defaults; safe out-of-scope boundaries documented.
++- REPL-focused defaults; out-of-scope boundaries documented.
+ - Clipboard/register behavior is explicit and tested.
+ 
+-## for you / not for you
+-
+-Use pi-vim if you want fast Vim muscle-memory in Pi prompts.
+-Skip it if you need full Vim feature parity (visual mode, macros, search,
+-ex-commands, etc.).
++Use pi-vim for fast Vim muscle-memory in Pi prompts. Skip it if you need
++full Vim parity (visual mode, macros, search, extended ex-commands, …).
+ 
+ ## common recipes
+ 
+@@ -56,6 +79,11 @@ ex-commands, etc.).
+ |------|------|
+ | Jump to exact line 25 | `25gg` (or `25G`) |
+ | Delete two words | `2dw` |
++| Change current whitespace-delimited WORD | `ciW` |
++| Delete WORD plus adjacent whitespace | `daW` |
++| Change inside double quotes | `ci"` |
++| Delete inside parentheses | `di(` |
++| Yank braces with contents | `ya{` |
+ | Change to end of line | `C` |
+ | Delete current + 2 lines below | `d2j` |
+ | Yank 3 lines | `3yy` |
+@@ -73,7 +101,8 @@ ex-commands, etc.).
+ | key      | action                                 |
+ |----------|----------------------------------------|
+ | `Esc` / `Ctrl+[` | Insert → Normal mode                   |
+-| `Esc` / `Ctrl+[` | Normal mode → pass to Pi (abort agent) |
++| `Esc` / `Ctrl+[` | Normal mode → pass to Pi (aborts the agent under default Pi keybindings) |
++| `:`      | Normal → EX mini-mode                   |
+ | `i`      | Normal → Insert at cursor              |
+ | `a`      | Normal → Insert after cursor           |
+ | `I`      | Normal → Insert at first non-whitespace |
+@@ -81,6 +110,24 @@ ex-commands, etc.).
+ | `o`      | Normal → open line below + Insert      |
+ | `O`      | Normal → open line above + Insert      |
+ 
++Optional: heavy users may want to move Pi's `app.interrupt` off bare `escape` in `~/.pi/agent/keybindings.json` since it overlaps with Insert→Normal. Pick your own replacement; user config overrides defaults.
++
++#### ex mini-mode
++
++Quit-only ex flows.
++
++| key / command | action |
++|---------------|--------|
++| `:` | Enter EX mini-mode |
++| `Enter` | Execute pending ex command |
++| `Esc` | Cancel EX mini-mode |
++| `Backspace` / `Ctrl+h` | Delete one ex-command character; on bare `:` exits EX mode |
++| `:q` | Quit the current Pi session only when the prompt is empty or whitespace-only; otherwise show a warning |
++| `:q!` | Force quit the current Pi session even when the prompt has text |
++| `:qa` | Same safe quit policy as `:q` |
++| `:qa!` | Same force quit policy as `:q!` |
++| unsupported `:{cmd}` | Show warning notification; no quit |
++
+ Insert-mode shortcuts (stay in Insert mode):
+ 
+ | key             | action                 |
+@@ -94,48 +141,18 @@ Insert-mode shortcuts (stay in Insert mode):
+ 
+ ### navigation (normal mode)
+ 
+-A `{count}` prefix can be prepended to any navigation key (max: `9999`).
+-
+-| key           | action                        |
+-|---------------|-------------------------------|
+-| `h`           | Left                          |
+-| `l`           | Right                         |
+-| `j`           | Down                          |
+-| `k`           | Up                            |
+-| `{count}h/l`  | Move left/right `{count}` cols  |
+-| `{count}j/k`  | Move down/up `{count}` lines (clamped to buffer size) |
+-| `0`           | Line start                    |
+-| `^`           | First non-whitespace char of line |
+-| `_`           | First non-whitespace char; with `{count}`, move down `count - 1` lines first |
+-| `$`           | Line end                      |
+-| `gg`          | Buffer start (line 1)         |
+-| `{count}gg`   | Go to line `{count}` (1-indexed, clamped) |
+-| `G`           | Buffer end (last line)        |
+-| `{count}G`    | Go to line `{count}` (1-indexed, clamped) |
+-| `w`           | Next `word` start (keyword/punctuation aware) |
+-| `b`           | Previous `word` start         |
+-| `e`           | `word` end (inclusive)        |
+-| `W`           | Next `WORD` start (whitespace-delimited token) |
+-| `B`           | Previous `WORD` start         |
+-| `E`           | `WORD` end (inclusive)        |
+-| `{count}w/b/e`| Move `{count}` `word` motions |
+-| `{count}W/B/E`| Move `{count}` `WORD` motions |
+-| `}`           | Move to next paragraph start (line start col `0`) |
+-| `{`           | Move to previous paragraph start (line start col `0`) |
+-| `{count}}`    | Repeat `}` `{count}` times |
+-| `{count}{`    | Repeat `{` `{count}` times |
+-
+-`word` (`w/b/e`) splits punctuation from keyword chars. `WORD` (`W/B/E`)
+-treats any non-whitespace run as one token (`foo-bar`, `path/to`, `x.y`).
+-
+-Paragraph boundary definition (this extension wave):
+-- blank line: matches `^\s*$`
+-- paragraph start: non-blank line at BOF, or non-blank line immediately after a blank line
+-
+-Standalone `{` / `}` motions are navigation-only (no text/register mutation).
+-Counted forms (`{count}{`, `{count}}`) step paragraph-by-paragraph.
+-If no further paragraph boundary exists, motions clamp at BOF/EOF.
+-Operator forms with braces (`d{`, `d}`, `c{`, `c}`, `y{`, `y}`) are out of scope for this wave.
++A `{count}` prefix can be prepended to navigation keys (max: `9999`).
++
++| key | action |
++|-----|--------|
++| `h` / `l` / `j` / `k`; `{count}h/l/j/k` | Move left/right/down/up; line moves clamp to the buffer |
++| `0` / `^` / `_` / `$` | Line start / first non-whitespace / counted first non-whitespace / line end |
++| `gg` / `G`; `{count}gg` / `{count}G` | Buffer start/end or absolute 1-indexed line |
++| `w` / `b` / `e`; `{count}w/b/e` | `word` start/back/end motions |
++| `W` / `B` / `E`; `{count}W/B/E` | whitespace-delimited `WORD` motions |
++| `{` / `}`; `{count}{` / `{count}}` | Previous/next paragraph start |
++
++`word` splits punctuation from keyword chars; `WORD` treats any non-whitespace run as one token (`foo-bar`, `path/to`). Paragraph starts are non-blank lines at BOF or after blank lines (`^\s*$`). `{` / `}` are navigation-only; brace operator forms (`d{`, `c}`, `y{`, …) are out of scope.
+ 
+ ---
+ 
+@@ -159,62 +176,60 @@ Char-find motions compose with operators: `df{char}`, `ct{char}`, `d{count}t{cha
+ 
+ ### edit operators (normal mode)
+ 
+-All operators write to the unnamed register and mirror to the system clipboard
+-(best-effort; clipboard failure never breaks editing).
++Register-writing edits write to the unnamed register. With the default clipboard mirror policy, they also mirror to the system clipboard best-effort (clipboard failure never breaks editing).
++
++#### text objects
++
++Text objects compose as `d`/`c`/`y` + `i`/`a` + object. `i` means inner; `a` means around.
++
++| object | keys | range |
++|--------|------|-------|
++| word | `iw` / `aw` | Keyword word; `aw` includes spaces |
++| WORD | `iW` / `aW` | Line-local whitespace-delimited WORD; `aW` includes adjacent whitespace |
++| quotes | `i"` / `a"`, `i'` / `a'`, <code>i`</code> / <code>a`</code> | Smallest containing quote pair on the line |
++| parentheses | `i(` / `a(`; aliases `i)` / `a)`, `ib` / `ab` | Smallest containing pair |
++| brackets | `i[` / `a[`; aliases `i]` / `a]` | Smallest containing pair |
++| braces | `i{` / `a{`; aliases `i}` / `a}`, `iB` / `aB` | Smallest containing pair |
++
++Semantics:
++- WORD objects are line-local and whitespace-delimited.
++- Quote objects are line-local; odd-backslash escapes are ignored; `a` includes delimiters only, not surrounding whitespace.
++- Bracket objects are buffer-aware, nested, lexical, and not parser-aware; brackets inside strings/comments still count.
++- Empty inner delimiter objects no-op for delete/yank; change enters Insert at the inner start without writing the register.
++- Delimited counts cancel (`d2i"`, `2ci(`, `y2a{`). Counted word/WORD text objects work for delete/change only; counted yank text objects cancel.
+ 
+ #### delete `d{motion}` / `dd`
+ 
+-A `{count}` or dual-count prefix (`{pfx}d{op}{motion}`) is supported for
+-word, char-find, and linewise motions. Maximum total count: `9999`.
+-
+-| command           | deletes                                                   |
+-|-------------------|-----------------------------------------------------------|
+-| `dw`              | Forward to next `word` start (exclusive, can cross lines) |
+-| `de`              | Forward to `word` end (inclusive, can cross lines)        |
+-| `db`              | Backward to `word` start (exclusive, can cross lines)     |
+-| `dW`              | Forward to next `WORD` start (exclusive, can cross lines) |
+-| `dE`              | Forward to `WORD` end (inclusive, can cross lines)        |
+-| `dB`              | Backward to `WORD` start (exclusive, can cross lines)     |
+-| `d{count}w/e/b`   | Forward/backward `{count}` `word` motions                 |
+-| `d{count}W/E/B`   | Forward/backward `{count}` `WORD` motions                 |
+-| `d$`              | To end of line                                            |
+-| `d0`              | To start of line                                          |
+-| `d^`              | To first non-whitespace char of line                      |
+-| `d_`              | Current line (linewise, same as `dd`)                     |
+-| `d{count}_`       | `{count}` lines (linewise, same as `{count}dd`)           |
+-| `dd`              | Current line (linewise)                                   |
+-| `{count}dd`       | `{count}` lines (linewise)                                |
+-| `d{count}j`       | Current line + `{count}` lines below (linewise)           |
+-| `d{count}k`       | Current line + `{count}` lines above (linewise)           |
+-| `dG`              | Current line to end of buffer (linewise)                  |
+-| `df{char}`        | To and including `char`                                   |
+-| `d{count}f{char}` | To and including Nth `char`                               |
+-| `dt{char}`        | Up to (not including) `char`                              |
+-| `dF{char}`        | Backward to and including `char`                          |
+-| `dT{char}`        | Backward to one after `char`                              |
+-| `diw`             | Inner word                                                |
+-| `daw`             | Around word (includes surrounding spaces)                 |
+-| `d{count}aw`      | Around `{count}` words                                    |
++A `{count}` or dual-count prefix (`{pfx}d{op}{motion}`) is supported for word,
++WORD, char-find, and linewise motions. Maximum total count: `9999`.
++
++| command | deletes |
++|---------|---------|
++| `dw` / `de` / `db`; `dW` / `dE` / `dB` | word/WORD motion ranges; `{count}` repeats |
++| `d$` / `d0` / `d^` | To EOL / BOL / first non-whitespace |
++| `d_` / `dd`; `d{count}_` / `{count}dd` | Current or counted whole lines |
++| `d{count}j` / `d{count}k` / `dG` | Linewise down/up/to EOF |
++| `df{c}` / `dt{c}` / `dF{c}` / `dT{c}`; `d{count}f{c}` | Char-find ranges |
++| `diw` / `daw`; `diW` / `daW` | Inner/around word or WORD |
++| `d{count}iw` / `d{count}iW`; `d{count}aw` / `d{count}aW` | Counted word/WORD text objects |
++| `di"` / `da"` (`'`, <code>`</code>) | Inside/around quotes |
++| `di(` / `da(`, `di[` / `da[`, `di{` / `da{` | Inside/around brackets; aliases `)`, `]`, `}`, `b`, `B` |
+ 
+ #### change `c{motion}` / `cc`
+ 
+ Same motion and count set as `d`. Deletes text then enters Insert mode.
+ 
+-| command         | action                             |
+-|-----------------|------------------------------------|
+-| `cw`            | Change `word` + Insert                        |
+-| `ce` / `cb`     | Change to `word` end / previous `word` start  |
+-| `cW`            | Change `WORD` + Insert (`cW` on non-space behaves like `cE`) |
+-| `cE` / `cB`     | Change to `WORD` end / previous `WORD` start  |
+-| `c{count}w/e/b` | Change `{count}` `word` motions + Insert      |
+-| `c{count}W/E/B` | Change `{count}` `WORD` motions + Insert      |
+-| `ciw`           | Change inner word                             |
+-| `caw`           | Change around word                            |
+-| `cc`            | Delete line content + Insert                  |
+-| `c_`            | Change line (linewise, same as `cc`)                  |
+-| `c{count}_`     | Change `{count}` lines (linewise)                     |
++| command | action |
++|---------|--------|
++| `cw` / `ce` / `cb`; `cW` / `cE` / `cB` | Change word/WORD motion ranges + Insert |
++| `c{count}w/e/b`; `c{count}W/E/B` | Change counted word/WORD motions + Insert |
++| `ciw` / `caw`; `ciW` / `caW` | Change word/WORD text objects + Insert |
++| `c{count}iw` / `c{count}iW`; `c{count}aw` / `c{count}aW` | Change counted word/WORD text objects + Insert |
++| `ci"` / `ca"` (`'`, <code>`</code>) | Change inside/around quotes + Insert |
++| `ci(` / `ca(`, `ci[` / `ca[`, `ci{` / `ca{` | Change inside/around brackets + Insert |
++| `cc` / `c_`; `c{count}_` | Change current or counted whole lines + Insert |
+ | `c$` / `c0` / `c^` | Delete to EOL / BOL / first non-whitespace + Insert |
+-| …               | All `d` motions apply                         |
++| … | All `d` motions apply |
+ 
+ #### single-key edits
+ 
+@@ -237,33 +252,20 @@ A `{count}` prefix is supported for `x`, `p`, `P`. Maximum: `9999`.
+ 
+ Same motion set as `d`. Writes to register, **no text mutation**.
+ 
+-| command | yanks                           |
+-|---------|---------------------------------|
+-| `yy`         | Whole line + trailing `\n`                     |
+-| `Y`          | Whole line + trailing `\n` (same as `yy`)      |
+-| `{count}yy`  | `{count}` whole lines + trailing `\n`          |
+-| `{count}Y`   | `{count}` whole lines + trailing `\n` (same as `{count}yy`) |
+-| `y{count}j`  | Current line + `{count}` lines below (linewise) |
+-| `y{count}k`  | Current line + `{count}` lines above (linewise) |
+-| `yG`         | Current line to end of buffer (linewise)         |
+-| `yw`         | Forward to next `word` start                      |
+-| `ye`         | To `word` end (inclusive)                         |
+-| `yb`         | Backward to `word` start                          |
+-| `yW`         | Forward to next `WORD` start                      |
+-| `yE`         | To `WORD` end (inclusive)                         |
+-| `yB`         | Backward to `WORD` start                          |
+-| `y$`         | To end of line                                    |
+-| `y0`         | To start of line                                  |
+-| `y^`         | To first non-whitespace char of line              |
+-| `y_`         | Whole line (linewise, same as `yy`)               |
+-| `y{count}_`  | `{count}` whole lines (linewise)                  |
+-| `yf{c}`      | To and including `char`                           |
+-| `yiw`        | Inner word                                        |
+-| `yaw`        | Around word (includes spaces)                     |
+-
+-Counted yank caveat: counted `word`/`WORD` yank motions are intentionally not
+-implemented (`y2w`, `2yw`, `y2W`, `2yW`, etc. cancel the pending operator).
+-Linewise counted yank (`{count}yy`, `y{count}j/k`) remains supported.
++| command | yanks |
++|---------|-------|
++| `yy` / `Y`; `{count}yy` / `{count}Y` | Whole line(s) + trailing `\n` |
++| `y{count}j` / `y{count}k` / `yG`; `y_` / `y{count}_` | Linewise ranges |
++| `yw` / `ye` / `yb`; `yW` / `yE` / `yB` | word/WORD motion ranges |
++| `y$` / `y0` / `y^`; `yf{c}` | EOL / BOL / first non-whitespace / char-find |
++| `yiw` / `yaw`; `yiW` / `yaW` | Inner/around word or WORD |
++| `yi"` / `ya"` (`'`, <code>`</code>) | Inside/around quotes |
++| `yi(` / `ya(`, `yi[` / `ya[`, `yi{` / `ya{` | Inside/around brackets; aliases `)`, `]`, `}`, `b`, `B` |
++
++Counted `word`/`WORD` yank motions and counted yank text objects (`y2w`,
++`2yw`, `y2W`, `2yW`, `y2aw`, `2yaw`, `y2aW`, `y2a{`, …) are intentionally not
++implemented and cancel the pending operator. Linewise counted yank (`{count}yy`,
++`y{count}j/k`) is supported.
+ 
+ ---
+ 
+@@ -276,8 +278,8 @@ Linewise counted yank (`{count}yy`, `y{count}j/k`) remains supported.
+ | `{count}p`   | Put `{count}` times after cursor                            |
+ | `{count}P`   | Put `{count}` times before cursor                           |
+ 
+-Put reads from the **unnamed register** (not OS clipboard).  
+-Line-wise detection: register content ending in `\n` is treated as line-wise.
++Put reads the OS clipboard first, falling back to the internal unnamed-register shadow on slow read.
++Paste text ending in `\n` is treated as line-wise.
+ 
+ ---
+ 
+@@ -295,54 +297,52 @@ Line-wise detection: register content ending in `\n` is treated as line-wise.
+ 
+ ## register and clipboard policy
+ 
+-- One unnamed register (like Vim's `""` register).
+-- Every `d`, `c`, `x`, `s`, `S`, `D`, `C`, `y` operator form
+-  (including `dd`/`d_`, `{count}dd`, `d{count}j/k`, `dG`, `yy`/`y_`, `{count}yy`,
+-  `y{count}j/k`, `yG`) writes to the register and mirrors to the OS clipboard
+-  (via `copyToClipboard`, best-effort).
+-- `p` / `P` read from the unnamed register only (not the OS clipboard).
+-- This gives stable behaviour across local terminals and SSH / OSC52 setups.
++- `piVim.clipboardMirror = "all"` is the default: every unnamed-register write mirrors to the OS clipboard best-effort.
++- `piVim.clipboardMirror = "yank"` mirrors yanks only; deletes and changes update only pi-vim's internal shadow.
++- `piVim.clipboardMirror = "never"` disables write mirroring while keeping internal register writes synchronous.
++- Rapid mirrored writes coalesce: only the latest pending value is guaranteed to be mirrored.
++- `p` / `P` read the OS clipboard first, falling back to the shadow on read failure/timeout.
++- While a mirror is in flight, `p` / `P` use the shadow so immediate yank/delete → put stays ordered.
++- Pi owns the terminal clipboard backends; on Wayland external state may lag while the shadow stays authoritative for immediate puts.
+ 
+ ---
+ 
+ ## known differences from full Vim
+ 
+-| area                  | this extension                         | full Vim                      |
+-|-----------------------|----------------------------------------|-------------------------------|
+-| `$` motion            | Moves past last char (readline CTRL+E) | Moves to last char            |
+-| `w` / `e` / `b` + `W` / `E` / `B` | Cross-line for `word` + `WORD` motions | Cross-line                    |
+-| `0` / `$` operators   | Exclusive of anchor col                | `0` inclusive of col 0        |
+-| Undo depth            | Delegates to underlying readline undo  | Full per-change undo tree     |
+-| Redo                  | Normal-mode `<C-r>` supported (safe no-op when empty; counted redo is stepwise, clamps to available history, and preserves single-step undo granularity) | `<C-r>`                       |
+-| Visual mode           | Not implemented                        | `v`, `V`, `<C-v>`            |
+-| Text objects          | Supports `iw`/`aw` only               | Full text-object set           |
+-| Count prefix          | Supported for operators, word/char motions, navigation, and edits (`x`, `r`, `p`/`P`); capped at `MAX_COUNT=9999` to prevent abuse | Full support |
+-| Named registers       | Not implemented (`"a`, etc.)           | Supported                     |
+-| Macros                | Not implemented (`q`, `@`)             | Supported                     |
+-| Search                | Not implemented (`/`, `?`, `n`, `N`)   | Supported                     |
+-| Ex commands           | Not implemented (`:s`, `:g`, etc.)     | Supported                     |
+-| Multi-line operators  | Supports `d/c/y` with `w/e/b` and `W/E/B`, plus `j/k` counts and `G`; not full Vim motion matrix | Rich cross-line semantics |
++| area | this extension | full Vim |
++|------|----------------|----------|
++| `$` motion | Moves past the last char (readline `Ctrl+E`) | Moves to the last char |
++| `w` / `e` / `b` + `W` / `E` / `B` | Cross-line for both `word` and `WORD` motions | Cross-line |
++| `0` / `$` operators | Exclusive of the anchor col | `0` is inclusive of col 0 |
++| Undo / redo | Delegates undo to readline; normal-mode `<C-r>` redo is supported | Full per-change undo tree |
++| Visual mode | Not implemented | `v`, `V`, `<C-v>` |
++| Text objects | `iw` / `aw`, `iW` / `aW`, quote objects, and paren/bracket/brace objects; delimited counts cancel | Full text-object set |
++| Count prefix | Operators, motions, navigation, `x`, `r`, `p`, `P`; capped at `MAX_COUNT=9999` | Full support |
++| Registers / macros / search | Not implemented | Supported |
++| Ex commands | Quit-only EX mini-mode (`:q`, `:q!`, `:qa`, `:qa!`) | Full ex command-line surface |
++| Multi-line operators | `d/c/y` with `w/e/b`, `W/E/B`, `j/k`, and `G`; not the full Vim motion matrix | Rich cross-line semantics |
+ 
+ ---
+ 
+ ## out of scope
+ 
+-These are **explicitly deferred** and not planned for this feature:
++Explicitly deferred:
+ 
+ - Visual modes (`v`, `V`, block visual)
+-- Extended text objects beyond word (`ip`, `i"`, `i(`, etc.)
+-- Named registers (`"a`, `"b`, …)
+-- Macros (`q{char}`, `@{char}`)
+-- Ex command surface (`:s`, `:g`, `:r`, …)
+-- Search mode (`/`, `?`, `n`, `N`)
+-- Repeat (`.`)
+-- Replace mode (`R`) — only single-char `r{char}` is supported
+-- Extended count prefix beyond currently supported motions (e.g. `:`, global operator counts)
+-- No insert-mode `<C-r>` feature expansion beyond current underlying-editor behavior.
+-- No cross-session redo persistence.
+-- No upstream `pi-tui` redo prerequisite in this wave.
+-- Window / tab / buffer management
+-- Plugin / runtime ecosystem compatibility
++- Tag text objects (`it`, `at`)
++- Paragraph/sentence text objects (`ip`, `ap`, `is`, `as`)
++- Angle bracket text objects (`i<`, `a<`)
++- Visual-mode text-object selection
++- Parser-aware delimiter matching
++- Delimited-object counts (`d2i"`, `2ci(`, `y2a{`)
++- Named registers (`"a`, `"b`, …), macros (`q{char}`, `@{char}`)
++- Ex surface beyond quit (`:s`, `:g`, `:w`, `:r`, …)
++- Search (`/`, `?`, `n`, `N`), repeat (`.`)
++- Replace mode (`R`) — only `r{char}` is supported
++- Count prefix beyond currently supported motions
++- No insert-mode `<C-r>` expansion, no cross-session redo persistence
++- No upstream `pi-tui` redo prerequisite
++- Window / tab / buffer management, plugin ecosystem compatibility
+ 
+ ---
+ 
+diff --git a/node_modules/pi-vim/clipboard-policy.ts b/node_modules/pi-vim/clipboard-policy.ts
+new file mode 100644
+index 0000000..6c7e2da
+--- /dev/null
++++ b/node_modules/pi-vim/clipboard-policy.ts
+@@ -0,0 +1,73 @@
++import { SettingsManager } from "@mariozechner/pi-coding-agent";
++
++export type ClipboardMirrorPolicy = "all" | "yank" | "never";
++export type RegisterWriteSource = "mutation" | "yank";
++
++export const DEFAULT_CLIPBOARD_MIRROR_POLICY: ClipboardMirrorPolicy = "all";
++
++export type PiVimSettings = { clipboardMirror?: unknown };
++
++type UnknownRecord = Record<string, unknown>;
++
++const missing = Symbol();
++
++function formatInvalid(value: unknown) {
++  const type = value === null ? "null" : Array.isArray(value) ? "array" : typeof value;
++  try {
++    return `${JSON.stringify(value) ?? type} (type ${type})`;
++  } catch {
++    return `(type ${type})`;
++  }
++}
++
++function readSetting(settings: unknown): unknown {
++  if (typeof settings !== "object" || settings === null || !Object.hasOwn(settings, "piVim")) return missing;
++  const piVim = (settings as UnknownRecord).piVim;
++  if (typeof piVim !== "object" || piVim === null || Array.isArray(piVim)) return piVim;
++  return Object.hasOwn(piVim, "clipboardMirror") ? (piVim as UnknownRecord).clipboardMirror : missing;
++}
++
++export function resolveClipboardMirrorPolicy(value: unknown) {
++  if (value === undefined) return { policy: DEFAULT_CLIPBOARD_MIRROR_POLICY };
++
++  if (typeof value === "string") {
++    const policy = value.trim().toLowerCase();
++    if (policy === "all" || policy === "yank" || policy === "never") {
++      return { policy: policy as ClipboardMirrorPolicy };
++    }
++  }
++
++  return {
++    policy: DEFAULT_CLIPBOARD_MIRROR_POLICY,
++    warning: `Invalid piVim.clipboardMirror ${formatInvalid(value)}; expected all, yank, never. Using all.`,
++  };
++}
++
++export function readPiVimClipboardMirrorSetting(globalSettings: unknown, projectSettings: unknown): unknown | undefined {
++  const project = readSetting(projectSettings);
++  if (project !== missing) return project;
++  const global = readSetting(globalSettings);
++  return global === missing ? undefined : global;
++}
++
++function readPiVimSettingsFromDisk(cwd: string): PiVimSettings {
++  const settings = SettingsManager.create(cwd);
++  return {
++    clipboardMirror: readPiVimClipboardMirrorSetting(settings.getGlobalSettings(), settings.getProjectSettings()),
++  };
++}
++
++let piVimSettingsReader = readPiVimSettingsFromDisk;
++
++export function readPiVimSettings(cwd: string) {
++  return piVimSettingsReader(cwd);
++}
++
++export function setPiVimSettingsReaderForTests(reader: typeof readPiVimSettingsFromDisk) {
++  const prev = piVimSettingsReader;
++  piVimSettingsReader = reader;
++
++  return () => {
++    piVimSettingsReader = prev;
++  };
++}
+diff --git a/node_modules/pi-vim/index.ts b/node_modules/pi-vim/index.ts
+index e6456fc..e4ebe3f 100644
+--- a/node_modules/pi-vim/index.ts
++++ b/node_modules/pi-vim/index.ts
+@@ -1,60 +1,19 @@
+-/**
+- * Modal Editor - vim-like modal editing extension
+- *
+- * Usage: pi --extension ./index.ts
+- *
+- * - Escape / ctrl+[: insert → normal mode (in normal mode, aborts agent)
+- * - i: normal → insert mode (at cursor)
+- * - a: insert after cursor
+- * - A: insert at end of line
+- * - I: insert at start of line
+- * - o: open new line below (insert mode)
+- * - O: open new line above (insert mode)
+- * - hjkl: navigation in normal mode
+- * - 0/$: line start/end
+- * - ^: first non-whitespace char of line
+- * - _: first non-whitespace (with count: down count-1 lines first); linewise with d/c/y
+- * - x: delete char under cursor
+- * - D: delete to end of line
+- * - S: substitute line (delete line content + insert mode)
+- * - s: substitute char (delete char + insert mode)
+- * - d{motion}: delete with motion (`w/b/e` + `W/B/E`, `$`, `0`, `^`, `dd`/`d_`, `f/t/F/T{char}`)
+- * - c{motion}: change with same motion set as `d` (then enter insert mode)
+- * - y{motion}: yank with same motion set as `d` (no text mutation)
+- * - f{char}: jump to next {char} on line
+- * - F{char}: jump to previous {char} on line
+- * - t{char}: jump to just before next {char} on line
+- * - T{char}: jump to just after previous {char} on line
+- * - ;: repeat last f/F/t/T motion (same direction)
+- * - ,: repeat last f/F/t/T motion (reverse direction)
+- * - w/b/e: `word` motions (keyword/punctuation aware)
+- * - W/B/E: `WORD` motions (whitespace-delimited non-space runs)
+- * - {/}: paragraph motions to previous/next paragraph start (line start col 0)
+- * - `{count}` prefixes supported for navigation, paragraph motions, and `d/c` word/WORD motions
+- * - operator forms with braces (`d{`, `d}`, `c{`, `c}`, `y{`, `y}`) are out of scope
+- * - counted yank caveat: `y2w`, `2yw`, `y2W`, `2yW` cancel (linewise counts still supported)
+- * - Shift+Alt+A: go to end of line (insert mode shortcut)
+- * - Shift+Alt+I: go to start of line (insert mode shortcut)
+- * - Alt+o: open new line below (insert mode shortcut)
+- * - Alt+Shift+o: open new line above (insert mode shortcut)
+- * - u: undo (normal mode, sends ctrl+_ to underlying readline editor)
+- * - ctrl+c, ctrl+d, etc. work in both modes
+- *
+- * Inspired by original repo:
+- * - https://github.com/badlogic/pi-mono
+- *   (packages/coding-agent/examples/extensions/modal-editor.ts)
+- *
+- * Additional ideas adapted from:
+- * - https://github.com/l-lin/dotfiles
+- *   (home-manager/modules/share/ai/pi/.pi/agent/extensions/vim-mode)
+- */
++import { spawn, spawnSync } from "node:child_process";
+ 
+ import {
+-  copyToClipboard,
++  createInitialContext,
++  processKeystroke,
++  TextBuffer,
++  type CursorPosition,
++  type VimAction,
++  type VimContext,
++} from "@vimee/core";
++import {
+   CustomEditor,
+   type ExtensionAPI,
+ } from "@mariozechner/pi-coding-agent";
+ import {
++  CURSOR_MARKER,
+   Key,
+   matchesKey,
+   truncateToWidth,
+@@ -95,11 +54,37 @@ import {
+   type WordMotionDirection,
+   type WordMotionTarget,
+ } from "./word-boundary-cache.js";
++import {
++  DEFAULT_CLIPBOARD_MIRROR_POLICY,
++  readPiVimSettings,
++  resolveClipboardMirrorPolicy,
++  type ClipboardMirrorPolicy,
++  type RegisterWriteSource,
++} from "./clipboard-policy.js";
++import {
++  resolveDelimitedTextObjectRange,
++  resolveWordTextObjectRange,
++  type TextObjectKind,
++  type TextObjectRange,
++  type WordTextObjectClass,
++} from "./text-objects.js";
+ 
+ const BRACKETED_PASTE_START = "\x1b[200~";
+ const BRACKETED_PASTE_END = "\x1b[201~";
+ const BRACKETED_PASTE_END_TAIL = BRACKETED_PASTE_END.slice(1);
+ const MAX_COUNT = 9999;
++const PI_NATIVE_CLIPBOARD_TIMEOUT_MS = 5000;
++const SOFTWARE_CURSOR_START = "\x1b[7m";
++const SOFTWARE_CURSOR_RESETS = ["\x1b[0m", "\x1b[27m"] as const;
++const INSERT_CURSOR_SHAPE = "\x1b[5 q";
++const BLOCK_CURSOR_SHAPE = "\x1b[1 q";
++const RESET_CURSOR_SHAPE = "\x1b[0 q";
++// Pi emits OSC52 before its native clipboard fallback. Give that 5s fallback
++// a small grace so the parent does not kill the helper and discard stdout.
++const CLIPBOARD_WRITE_TIMEOUT_MS = PI_NATIVE_CLIPBOARD_TIMEOUT_MS + 500;
++const CLIPBOARD_SPAWN_FAILURE_LIMIT = 3;
++const CLIPBOARD_READ_TIMEOUT_MS = 750;
++const CLIPBOARD_READ_MAX_BUFFER_BYTES = 1024 * 1024;
+ 
+ type EditorSnapshot = {
+   text: string;
+@@ -113,22 +98,471 @@ type ModalEditorInternals = {
+   preferredVisualCol?: number | null;
+   lastAction?: string | null;
+   historyIndex?: number;
++  scrollOffset?: number;
+   onChange?: (text: string) => void;
+   tui?: { requestRender?: () => void };
+   pushUndoSnapshot?: () => void;
+   setCursorCol?: (col: number) => void;
+ };
+ 
++type CustomEditorConstructorArgs = ConstructorParameters<typeof CustomEditor>;
++type ClipboardWriteFn = (text: string, signal: AbortSignal) => Promise<void>;
++type ClipboardReadFn = () => string | null;
++type ClipboardProcess = ReturnType<typeof spawn>;
++
++type ModeLabelColorizers = {
++  insert: (s: string) => string;
++  normal: (s: string) => string;
++  ex: (s: string) => string;
++};
++
++type CursorShapeSequence =
++  | typeof INSERT_CURSOR_SHAPE
++  | typeof BLOCK_CURSOR_SHAPE
++  | typeof RESET_CURSOR_SHAPE;
++
++type CursorShapeRuntime = {
++  writeCursorShape: (sequence: CursorShapeSequence) => void;
++  setShowHardwareCursor: (show: boolean) => void;
++  getShowHardwareCursor?: () => boolean | undefined;
++};
++
++type CursorShapeCleanup = () => void;
++
++type CursorShapeTuiCandidate = {
++  terminal?: { write?: unknown };
++  setShowHardwareCursor?: unknown;
++  getShowHardwareCursor?: unknown;
++};
++
++type VisualHighlightRange = { start: number; end: number };
++type LayoutSpan = {
++  logicalLine: number;
++  startCol: number;
++  endCol: number;
++};
++
++function getCursorShapeRuntime(tui: unknown): CursorShapeRuntime | null {
++  if (typeof tui !== "object" || tui === null) return null;
++
++  const candidate = tui as CursorShapeTuiCandidate;
++  const terminal = candidate.terminal;
++  if (typeof terminal !== "object" || terminal === null) return null;
++
++  const write = terminal.write;
++  const setShowHardwareCursor = candidate.setShowHardwareCursor;
++  if (typeof write !== "function" || typeof setShowHardwareCursor !== "function") {
++    return null;
++  }
++
++  const runtime: CursorShapeRuntime = {
++    writeCursorShape(sequence: CursorShapeSequence): void {
++      write.call(terminal, sequence);
++    },
++    setShowHardwareCursor(show: boolean): void {
++      setShowHardwareCursor.call(candidate, show);
++    },
++  };
++
++  if (typeof candidate.getShowHardwareCursor === "function") {
++    const getShowHardwareCursor = candidate.getShowHardwareCursor;
++    runtime.getShowHardwareCursor = () => {
++      const value = getShowHardwareCursor.call(candidate);
++      return typeof value === "boolean" ? value : undefined;
++    };
++  }
++
++  return runtime;
++}
++
++function enableCursorShapeSupport(tui: unknown): CursorShapeCleanup | null {
++  const runtime = getCursorShapeRuntime(tui);
++  if (!runtime) return null;
++
++  const previousShowHardwareCursor = runtime.getShowHardwareCursor?.();
++  runtime.setShowHardwareCursor(true);
++
++  return () => {
++    runtime.writeCursorShape(RESET_CURSOR_SHAPE);
++    if (previousShowHardwareCursor !== undefined) {
++      runtime.setShowHardwareCursor(previousShowHardwareCursor);
++    }
++  };
++}
++
++function findSoftwareCursorReset(
++  line: string,
++  startIndex: number,
++): { index: number; sequence: (typeof SOFTWARE_CURSOR_RESETS)[number] } | null {
++  let firstReset: { index: number; sequence: (typeof SOFTWARE_CURSOR_RESETS)[number] } | null = null;
++
++  for (const sequence of SOFTWARE_CURSOR_RESETS) {
++    const index = line.indexOf(sequence, startIndex);
++    if (index === -1) continue;
++    if (!firstReset || index < firstReset.index) {
++      firstReset = { index, sequence };
++    }
++  }
++
++  return firstReset;
++}
++
++function stripSoftwareCursorAfterMarker(line: string): string {
++  const markerIndex = line.indexOf(CURSOR_MARKER);
++  if (markerIndex === -1) return line;
++
++  const searchStart = markerIndex + CURSOR_MARKER.length;
++  const cursorStart = line.indexOf(SOFTWARE_CURSOR_START, searchStart);
++  if (cursorStart === -1) return line;
++
++  const cursorContentStart = cursorStart + SOFTWARE_CURSOR_START.length;
++  const reset = findSoftwareCursorReset(line, cursorContentStart);
++  if (!reset) return line;
++
++  return line.slice(0, cursorStart)
++    + line.slice(cursorContentStart, reset.index)
++    + line.slice(reset.index + reset.sequence.length);
++}
++
++type ClipboardCircuitBreaker = {
++  consecutiveEnvironmentFailures: number;
++  disabled: boolean;
++};
++
++const processClipboardCircuitBreaker: ClipboardCircuitBreaker = {
++  consecutiveEnvironmentFailures: 0,
++  disabled: false,
++};
++
++function resetClipboardCircuitBreaker(): void {
++  processClipboardCircuitBreaker.consecutiveEnvironmentFailures = 0;
++  processClipboardCircuitBreaker.disabled = false;
++}
++
++class ClipboardSpawnError extends Error {
++  constructor(message: string, options?: { cause?: unknown }) {
++    super(message, options);
++    this.name = "ClipboardSpawnError";
++  }
++}
++
++type SpawnErrnoLike = Error & { code?: unknown; syscall?: unknown };
++
++function isNodeSpawnErrno(error: unknown): boolean {
++  if (!(error instanceof Error)) return false;
++
++  const candidate = error as SpawnErrnoLike;
++  return typeof candidate.code === "string"
++    && candidate.code.length > 0
++    && typeof candidate.syscall === "string"
++    && candidate.syscall.startsWith("spawn");
++}
++
++function isClipboardEnvironmentFailure(error: unknown): boolean {
++  return error instanceof ClipboardSpawnError || isNodeSpawnErrno(error);
++}
++
++const PI_CODING_AGENT_MODULE_URL = import.meta.resolve("@mariozechner/pi-coding-agent");
++const CLIPBOARD_HELPER_SOURCE = `
++import { copyToClipboard } from ${JSON.stringify(PI_CODING_AGENT_MODULE_URL)};
++
++const chunks = [];
++for await (const chunk of process.stdin) {
++  chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
++}
++
++try {
++  await Promise.resolve(copyToClipboard(Buffer.concat(chunks).toString("utf8")));
++} catch {
++  // Pi clipboard writes are best-effort. Backend failures must not make the
++  // helper exit non-zero and trip the parent spawn/environment breaker.
++}
++`;
++
++const CLIPBOARD_READ_HELPER_SOURCE = `
++import { createRequire } from "node:module";
++
++const require = createRequire(${JSON.stringify(PI_CODING_AGENT_MODULE_URL)});
++const clipboard = require("@mariozechner/clipboard");
++if (!await clipboard.hasText()) {
++  process.exit(0);
++}
++const text = await clipboard.getText();
++if (typeof text === "string") {
++  process.stdout.write(text);
++}
++`;
++
++function readClipboardInChildProcess(): string | null {
++  try {
++    const result = spawnSync(
++      process.execPath,
++      ["--input-type=module", "-e", CLIPBOARD_READ_HELPER_SOURCE],
++      {
++        encoding: "utf8",
++        maxBuffer: CLIPBOARD_READ_MAX_BUFFER_BYTES,
++        stdio: ["ignore", "pipe", "ignore"],
++        timeout: CLIPBOARD_READ_TIMEOUT_MS,
++        windowsHide: true,
++      },
++    );
++
++    if (result.error || result.status !== 0 || result.signal) return null;
++    return result.stdout ?? "";
++  } catch {
++    return null;
++  }
++}
++
++function createClipboardAbortError(message: string): Error {
++  const error = new Error(message);
++  error.name = "AbortError";
++  return error;
++}
++
++function getAbortError(signal: AbortSignal): Error {
++  return signal.reason instanceof Error
++    ? signal.reason
++    : createClipboardAbortError("clipboard write aborted");
++}
++
++function killClipboardProcess(child: ClipboardProcess): void {
++  if (child.exitCode !== null || child.signalCode !== null) return;
++
++  try {
++    child.kill("SIGKILL");
++  } catch {
++    // Best effort only; clipboard mirroring must not affect editing.
++  }
++}
++
++function writeClipboardInChildProcess(text: string, signal: AbortSignal): Promise<void> {
++  return new Promise<void>((resolve, reject) => {
++    if (signal.aborted) {
++      reject(getAbortError(signal));
++      return;
++    }
++
++    let child: ClipboardProcess | null = null;
++    let settled = false;
++    const stdoutChunks: Buffer[] = [];
++
++    function finish(error?: unknown): void {
++      if (settled) return;
++      settled = true;
++      signal.removeEventListener("abort", onAbort);
++      if (error) {
++        reject(error);
++      } else {
++        resolve();
++      }
++    }
++
++    function onAbort(): void {
++      if (child) {
++        killClipboardProcess(child);
++      }
++      finish(getAbortError(signal));
++    }
++
++    try {
++      child = spawn(process.execPath, ["--input-type=module", "-e", CLIPBOARD_HELPER_SOURCE], {
++        stdio: ["pipe", "pipe", "ignore"],
++        windowsHide: true,
++      });
++    } catch (error) {
++      finish(new ClipboardSpawnError("clipboard helper spawn failed", { cause: error }));
++      return;
++    }
++
++    signal.addEventListener("abort", onAbort, { once: true });
++
++    child.stdout?.on("data", (chunk: Buffer | string) => {
++      stdoutChunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
++    });
++    child.stdout?.on("error", (error) => {
++      finish(error);
++    });
++
++    child.once("error", (error) => {
++      finish(new ClipboardSpawnError("clipboard helper spawn failed", { cause: error }));
++    });
++
++    child.once("close", (code) => {
++      if (settled) return;
++
++      if (signal.aborted) {
++        finish(getAbortError(signal));
++        return;
++      }
++
++      if (code === 0) {
++        try {
++          for (const chunk of stdoutChunks) {
++            process.stdout.write(chunk);
++          }
++        } catch (error) {
++          finish(error);
++          return;
++        }
++        finish();
++        return;
++      }
++
++      finish(new ClipboardSpawnError(`clipboard helper failed with exit code ${code ?? "null"}`));
++    });
++
++    if (!child.stdin) {
++      killClipboardProcess(child);
++      finish(new ClipboardSpawnError("clipboard helper stdin unavailable"));
++      return;
++    }
++
++    child.stdin.on("error", (error: NodeJS.ErrnoException) => {
++      if (signal.aborted) {
++        finish(getAbortError(signal));
++        return;
++      }
++
++      if (error.code === "EPIPE" || error.code === "ERR_STREAM_DESTROYED") {
++        return;
++      }
++
++      finish(error);
++    });
++
++    try {
++      child.stdin.end(text);
++    } catch (error) {
++      finish(error);
++    }
++  });
++}
++
++class ClipboardMirror {
++  private activeController: AbortController | null = null;
++  private activeText: string | null = null;
++  private draining = false;
++  private pendingText: string | null = null;
++
++  constructor(
++    private writeFn: ClipboardWriteFn,
++    private timeoutMs: number = CLIPBOARD_WRITE_TIMEOUT_MS,
++    private readonly circuitBreaker: ClipboardCircuitBreaker = processClipboardCircuitBreaker,
++  ) {}
++
++  setWriteFn(writeFn: ClipboardWriteFn): void {
++    this.activeController?.abort(createClipboardAbortError("clipboard writer replaced"));
++    this.writeFn = writeFn;
++    resetClipboardCircuitBreaker();
++  }
++
++  setTimeoutMs(timeoutMs: number): void {
++    this.timeoutMs = Math.max(0, timeoutMs);
++  }
++
++  hasPendingWrite(): boolean {
++    return this.activeText !== null || this.pendingText !== null || this.draining;
++  }
++
++  mirror(text: string): void {
++    if (this.circuitBreaker.disabled) return;
++
++    this.pendingText = text;
++
++    if (!this.draining) {
++      void this.drain();
++    }
++  }
++
++  private async drain(): Promise<void> {
++    if (this.draining) return;
++    this.draining = true;
++
++    try {
++      while (this.pendingText !== null && !this.circuitBreaker.disabled) {
++        const text = this.pendingText;
++        this.pendingText = null;
++        const controller = new AbortController();
++        this.activeController = controller;
++        this.activeText = text;
++
++        try {
++          await this.writeWithTimeout(text, controller);
++          this.circuitBreaker.consecutiveEnvironmentFailures = 0;
++        } catch (error) {
++          this.recordWriteFailure(error);
++          // Clipboard mirroring is best-effort; the register is authoritative.
++        } finally {
++          if (this.activeController === controller) {
++            this.activeController = null;
++          }
++          this.activeText = null;
++        }
++      }
++
++      if (this.circuitBreaker.disabled) {
++        this.pendingText = null;
++      }
++    } finally {
++      this.draining = false;
++      if (this.pendingText !== null && !this.circuitBreaker.disabled) {
++        void this.drain();
++      }
++    }
++  }
++
++  private recordWriteFailure(error: unknown): void {
++    if (!isClipboardEnvironmentFailure(error)) {
++      this.circuitBreaker.consecutiveEnvironmentFailures = 0;
++      return;
++    }
++
++    this.circuitBreaker.consecutiveEnvironmentFailures += 1;
++    if (this.circuitBreaker.consecutiveEnvironmentFailures >= CLIPBOARD_SPAWN_FAILURE_LIMIT) {
++      this.circuitBreaker.disabled = true;
++      this.pendingText = null;
++    }
++  }
++
++  private async writeWithTimeout(text: string, controller: AbortController): Promise<void> {
++    const timeoutError = createClipboardAbortError("clipboard write timed out");
++    const timeoutId = setTimeout(() => {
++      controller.abort(timeoutError);
++    }, this.timeoutMs);
++
++    try {
++      await this.writeFn(text, controller.signal);
++    } catch (error) {
++      if (controller.signal.aborted) {
++        throw getAbortError(controller.signal);
++      }
++      throw error;
++    } finally {
++      clearTimeout(timeoutId);
++    }
++  }
++}
++
+ export class ModalEditor extends CustomEditor {
++  static [Symbol.hasInstance](instance: unknown): boolean {
++    if (typeof instance !== "object" || instance === null) return false;
++    return Object.prototype.isPrototypeOf.call(ModalEditor.prototype, instance)
++      || (instance as { __piVimModalEditorBrand?: boolean }).__piVimModalEditorBrand === true;
++  }
++
+   private mode: Mode = "insert";
+   private pendingMotion: PendingMotion = null;
+-  private pendingTextObject: "i" | "a" | null = null;
++  private pendingTextObject: TextObjectKind | null = null;
+   private pendingOperator: PendingOperator = null;
+   private prefixCount: string = "";
+   private operatorCount: string = "";
+   private pendingG: boolean = false;
+   private pendingGCount: string = "";
+   private pendingReplace: boolean = false;
++  private pendingExCommand: string | null = null;
++  private acceptingBracketedPasteInExCommand: boolean = false;
++  private pendingEscWhileAcceptingBracketedPasteInExCommand: boolean = false;
+   private lastCharMotion: LastCharMotion | null = null;
+   private discardingBracketedPasteInNormalMode: boolean = false;
+   private pendingEscWhileDiscardingBracketedPasteInNormalMode: boolean = false;
+@@ -136,30 +570,49 @@ export class ModalEditor extends CustomEditor {
+   private readonly redoStack: EditorSnapshot[] = [];
+   private currentTransition: TransitionState = "none";
+   private onChangeHooked: boolean = false;
+-  private readonly labelColorizers: { insert: (s: string) => string; normal: (s: string) => string } | null;
++  private readonly labelColorizers: ModeLabelColorizers | null;
++  private readonly cursorShapeRuntime: CursorShapeRuntime | null;
++  private lastCursorShapeSequence: CursorShapeSequence | null = null;
+ 
+   // Unnamed register
+   private unnamedRegister: string = "";
+-  private clipboardFn: (text: string) => Promise<void> = async (text: string) => {
+-    await copyToClipboard(text);
+-  };
++  private clipboardMirrorPolicy: ClipboardMirrorPolicy = DEFAULT_CLIPBOARD_MIRROR_POLICY;
++  private readonly clipboardMirror = new ClipboardMirror(writeClipboardInChildProcess);
++  private clipboardReadFn: ClipboardReadFn = readClipboardInChildProcess;
++  private quitFn: () => void = () => {};
++  private notifyFn: (message: string) => void = () => {};
+ 
+   constructor(
+-    tui: any,
+-    theme: any,
+-    kb: any,
+-    labelColorizers?: { insert: (s: string) => string; normal: (s: string) => string } | null,
++    tui: CustomEditorConstructorArgs[0],
++    theme: CustomEditorConstructorArgs[1],
++    kb: CustomEditorConstructorArgs[2],
++    labelColorizers?: ModeLabelColorizers | null,
+   ) {
+     super(tui, theme, kb);
++    this.cursorShapeRuntime = getCursorShapeRuntime(tui);
+     this.labelColorizers = labelColorizers ?? null;
+   }
+ 
+   // Test seams
+-  setClipboardFn(fn: (text: string) => unknown): void {
+-    this.clipboardFn = async (text: string) => {
+-      await fn(text);
+-    };
++  setClipboardFn(fn: (text: string, signal?: AbortSignal) => unknown): void {
++    this.clipboardMirror.setWriteFn(async (text: string, signal: AbortSignal) => {
++      await fn(text, signal);
++    });
++  }
++  setClipboardWriteTimeoutMs(timeoutMs: number): void {
++    this.clipboardMirror.setTimeoutMs(timeoutMs);
++  }
++  setClipboardReadFn(fn: ClipboardReadFn): void {
++    this.clipboardReadFn = fn;
+   }
++  setClipboardMirrorPolicy(policy: ClipboardMirrorPolicy): void {
++    this.clipboardMirrorPolicy = policy;
++  }
++  getClipboardMirrorPolicy(): ClipboardMirrorPolicy {
++    return this.clipboardMirrorPolicy;
++  }
++  setQuitFn(fn: () => void): void { this.quitFn = fn; }
++  setNotifyFn(fn: (message: string) => void): void { this.notifyFn = fn; }
+   getRegister(): string { return this.unnamedRegister; }
+   setRegister(text: string): void { this.unnamedRegister = text; }
+   getMode(): Mode { return this.mode; }
+@@ -348,6 +801,26 @@ export class ModalEditor extends CustomEditor {
+     editor.tui?.requestRender?.();
+   }
+ 
++  private startPendingExCommand(): void {
++    this.pendingExCommand = ":";
++    this.acceptingBracketedPasteInExCommand = false;
++    this.pendingEscWhileAcceptingBracketedPasteInExCommand = false;
++  }
++
++  private clearPendingExCommand(): void {
++    const shouldDiscardBracketedPasteTail = this.acceptingBracketedPasteInExCommand
++      || this.pendingEscWhileAcceptingBracketedPasteInExCommand;
++
++    this.pendingExCommand = null;
++    this.acceptingBracketedPasteInExCommand = false;
++    this.pendingEscWhileAcceptingBracketedPasteInExCommand = false;
++
++    if (shouldDiscardBracketedPasteTail) {
++      this.discardingBracketedPasteInNormalMode = true;
++      this.pendingEscWhileDiscardingBracketedPasteInNormalMode = false;
++    }
++  }
++
+   private clearPendingState(): void {
+     this.pendingMotion = null;
+     this.pendingTextObject = null;
+@@ -357,12 +830,69 @@ export class ModalEditor extends CustomEditor {
+     this.pendingG = false;
+     this.pendingGCount = "";
+     this.pendingReplace = false;
++    this.clearPendingExCommand();
+   }
+ 
+   private isEscapeLikeInput(data: string): boolean {
+     return matchesKey(data, "escape") || matchesKey(data, "ctrl+[");
+   }
+ 
++  private normalizePendingExCommandInput(data: string): string | null {
++    let chunk = data;
++    let normalized = "";
++
++    while (true) {
++      if (this.acceptingBracketedPasteInExCommand) {
++        if (this.pendingEscWhileAcceptingBracketedPasteInExCommand) {
++          if (chunk.startsWith(BRACKETED_PASTE_END_TAIL)) {
++            this.pendingEscWhileAcceptingBracketedPasteInExCommand = false;
++            this.acceptingBracketedPasteInExCommand = false;
++            chunk = chunk.slice(BRACKETED_PASTE_END_TAIL.length);
++            if (chunk.length === 0) {
++              return normalized.length > 0 ? normalized : null;
++            }
++            continue;
++          }
++
++          normalized += "\x1b";
++          this.pendingEscWhileAcceptingBracketedPasteInExCommand = false;
++        }
++
++        const end = chunk.indexOf(BRACKETED_PASTE_END);
++        if (end !== -1) {
++          normalized += chunk.slice(0, end);
++          this.acceptingBracketedPasteInExCommand = false;
++          chunk = chunk.slice(end + BRACKETED_PASTE_END.length);
++          if (chunk.length === 0) {
++            return normalized.length > 0 ? normalized : null;
++          }
++          continue;
++        }
++
++        if (this.isEscapeLikeInput(chunk)) {
++          this.pendingEscWhileAcceptingBracketedPasteInExCommand = true;
++          return normalized.length > 0 ? normalized : null;
++        }
++
++        normalized += chunk;
++        return normalized.length > 0 ? normalized : null;
++      }
++
++      const start = chunk.indexOf(BRACKETED_PASTE_START);
++      if (start === -1) {
++        normalized += chunk;
++        return normalized.length > 0 ? normalized : null;
++      }
++
++      normalized += chunk.slice(0, start);
++      chunk = chunk.slice(start + BRACKETED_PASTE_START.length);
++      this.acceptingBracketedPasteInExCommand = true;
++      if (chunk.length === 0) {
++        return normalized.length > 0 ? normalized : null;
++      }
++    }
++  }
++
+   private stripBracketedPasteInNormalMode(data: string): { filtered: string | null; stripped: boolean } {
+     let chunk = data;
+     let stripped = false;
+@@ -401,7 +931,11 @@ export class ModalEditor extends CustomEditor {
+   handleInput(data: string): void {
+     this.ensureOnChangeHook();
+ 
+-    if (this.mode !== "insert") {
++    if (this.pendingExCommand !== null) {
++      const normalized = this.normalizePendingExCommandInput(data);
++      if (normalized === null) return;
++      data = normalized;
++    } else if (this.mode !== "insert") {
+       if (this.discardingBracketedPasteInNormalMode) {
+         if (this.isEscapeLikeInput(data)) {
+           if (this.pendingEscWhileDiscardingBracketedPasteInNormalMode) {
+@@ -438,17 +972,20 @@ export class ModalEditor extends CustomEditor {
+     }
+ 
+     if (this.isEscapeLikeInput(data)) {
+-      return this.handleEscape();
++      this.handleEscape();
++      return;
+     }
+ 
+     if (this.mode === "insert") {
+       // Shift+Alt+A: go to end of line (like Esc -> A but stay in insert)
+       if (matchesKey(data, Key.shiftAlt("a")) || data === "\x1bA") {
+-        return super.handleInput(CTRL_E);
++        super.handleInput(CTRL_E);
++        return;
+       }
+       // Shift+Alt+I: go to start of line (like Esc -> I but stay in insert)
+       if (matchesKey(data, Key.shiftAlt("i")) || data === "\x1bI") {
+-        return super.handleInput(CTRL_A);
++        super.handleInput(CTRL_A);
++        return;
+       }
+       // Alt+o: open new line below (stay in insert mode)
+       if (matchesKey(data, Key.alt("o")) || data === "\x1bo") {
+@@ -491,24 +1028,34 @@ export class ModalEditor extends CustomEditor {
+       return;
+     }
+ 
++    if (this.pendingExCommand !== null) {
++      this.handlePendingExCommand(data);
++      return;
++    }
++
+     if (this.pendingTextObject) {
+-      return this.handlePendingTextObject(data);
++      this.handlePendingTextObject(data);
++      return;
+     }
+ 
+     if (this.pendingMotion) {
+-      return this.handlePendingMotion(data);
++      this.handlePendingMotion(data);
++      return;
+     }
+ 
+     if (this.pendingOperator === "d") {
+-      return this.handlePendingDelete(data);
++      this.handlePendingDelete(data);
++      return;
+     }
+ 
+     if (this.pendingOperator === "c") {
+-      return this.handlePendingChange(data);
++      this.handlePendingChange(data);
++      return;
+     }
+ 
+     if (this.pendingOperator === "y") {
+-      return this.handlePendingYank(data);
++      this.handlePendingYank(data);
++      return;
+     }
+ 
+     this.handleNormalMode(data);
+@@ -533,6 +1080,11 @@ export class ModalEditor extends CustomEditor {
+   }
+ 
+   private handleEscape(): void {
++    if (this.pendingExCommand !== null) {
++      this.clearPendingExCommand();
++      return;
++    }
++
+     if (
+       this.pendingMotion
+       || this.pendingTextObject
+@@ -554,11 +1106,135 @@ export class ModalEditor extends CustomEditor {
+     }
+   }
+ 
++  private isEnterLikeInput(data: string): boolean {
++    return data === "\r" || data === "\n" || matchesKey(data, "enter") || matchesKey(data, "return");
++  }
++
++  private isBackspaceLikeInput(data: string): boolean {
++    return data === "\x7f" || data === "\x08" || matchesKey(data, "backspace") || matchesKey(data, "ctrl+h");
++  }
++
++  private deleteLastPendingExCommandGrapheme(): void {
++    const current = this.pendingExCommand ?? "";
++    const graphemes = getLineGraphemes(current);
++
++    if (graphemes.length <= 1) {
++      this.clearPendingExCommand();
++      return;
++    }
++
++    const previousGrapheme = graphemes[graphemes.length - 2];
++    if (!previousGrapheme) {
++      this.clearPendingExCommand();
++      return;
++    }
++
++    this.pendingExCommand = current.slice(0, previousGrapheme.end);
++  }
++
++  private handlePendingExCommandControlChunk(data: string): boolean {
++    if (
++      !data.includes("\r")
++      && !data.includes("\n")
++      && !data.includes("\x7f")
++      && !data.includes("\x08")
++    ) {
++      return false;
++    }
++
++    let printable = "";
++    const flushPrintable = () => {
++      if (!printable) return;
++      this.pendingExCommand += printable;
++      printable = "";
++    };
++
++    for (const char of data) {
++      if (char === "\r" || char === "\n") {
++        flushPrintable();
++        this.submitPendingExCommand();
++        return true;
++      }
++
++      if (char === "\x7f" || char === "\x08") {
++        flushPrintable();
++        this.deleteLastPendingExCommandGrapheme();
++        if (this.pendingExCommand === null) {
++          return true;
++        }
++        continue;
++      }
++
++      const codePoint = char.codePointAt(0);
++      if (codePoint === undefined || codePoint < 32 || codePoint === 127) {
++        this.clearPendingExCommand();
++        return true;
++      }
++
++      printable += char;
++    }
++
++    flushPrintable();
++    return true;
++  }
++
++  private handlePendingExCommand(data: string): void {
++    if (this.isEnterLikeInput(data)) {
++      this.submitPendingExCommand();
++      return;
++    }
++
++    if (this.isBackspaceLikeInput(data)) {
++      this.deleteLastPendingExCommandGrapheme();
++      return;
++    }
++
++    if (this.handlePendingExCommandControlChunk(data)) {
++      return;
++    }
++
++    if (!this.isPrintableChunk(data)) {
++      this.clearPendingExCommand();
++      this.handleInput(data);
++      return;
++    }
++
++    this.pendingExCommand += data;
++  }
++
++  private hasNonEmptyPrompt(): boolean {
++    return this.getText().trim().length > 0;
++  }
++
++  private submitPendingExCommand(): void {
++    const command = this.pendingExCommand?.slice(1).trim() ?? "";
++    this.clearPendingExCommand();
++
++    if (command === "q" || command === "qa") {
++      if (this.hasNonEmptyPrompt()) {
++        this.notifyFn(`Prompt is not empty; use :${command}! to quit anyway`);
++        return;
++      }
++
++      this.quitFn();
++      return;
++    }
++
++    if (command === "q!" || command === "qa!") {
++      this.quitFn();
++      return;
++    }
++
++    if (command) {
++      this.notifyFn(`Unsupported ex command: :${command}`);
++    }
++  }
++
+   private isPrintableChunk(data: string): boolean {
+     if (data.length === 0) return false;
+     for (const char of data) {
+-      const codePoint = char.codePointAt(0)!;
+-      if (codePoint < 32 || codePoint === 127) return false;
++      const codePoint = char.codePointAt(0);
++      if (codePoint === undefined || codePoint < 32 || codePoint === 127) return false;
+     }
+     return true;
+   }
+@@ -603,6 +1279,10 @@ export class ModalEditor extends CustomEditor {
+     return Math.min(MAX_COUNT, total);
+   }
+ 
++  private hasPendingCount(): boolean {
++    return this.prefixCount.length > 0 || this.operatorCount.length > 0;
++  }
++
+   private cancelPendingOperator(data: string): void {
+     this.pendingOperator = null;
+     this.prefixCount = "";
+@@ -619,59 +1299,101 @@ export class ModalEditor extends CustomEditor {
+       return;
+     }
+ 
++    const pendingMotion = this.pendingMotion;
++    if (!pendingMotion) return;
++
+     if (this.pendingOperator === "d") {
+-      this.deleteWithCharMotion(this.pendingMotion!, data);
++      this.deleteWithCharMotion(pendingMotion, data);
+       this.pendingOperator = null;
+     } else if (this.pendingOperator === "c") {
+-      this.deleteWithCharMotion(this.pendingMotion!, data);
++      this.deleteWithCharMotion(pendingMotion, data);
+       this.pendingOperator = null;
+       this.mode = "insert";
+     } else if (this.pendingOperator === "y") {
+-      this.yankWithCharMotion(this.pendingMotion!, data);
++      this.yankWithCharMotion(pendingMotion, data);
+       this.pendingOperator = null;
+     } else {
+-      this.executeCharMotion(this.pendingMotion!, data);
++      this.executeCharMotion(pendingMotion, data);
+     }
+ 
+     this.pendingMotion = null;
+   }
+ 
+   private handlePendingTextObject(data: string): void {
+-    if (data !== "w") {
+-      this.pendingTextObject = null;
+-      this.cancelPendingOperator(data);
++    const pendingTextObject = this.pendingTextObject;
++    this.pendingTextObject = null;
++    if (!pendingTextObject) {
++      this.pendingOperator = null;
+       return;
+     }
+ 
+-    const count = this.takeTotalCount(1);
+-    const range = this.getWordObjectRange(this.pendingTextObject!, count);
+-    this.pendingTextObject = null;
+-    if (!range || !this.pendingOperator) {
+-      this.pendingOperator = null;
++    const hasCount = this.hasPendingCount();
++
++    if (this.pendingOperator === "y" && hasCount) {
++      this.cancelPendingOperator(data);
+       return;
+     }
+ 
+-    const { startAbs, endAbs } = range;
+-    if (this.pendingOperator === "d") {
+-      this.deleteRangeByAbsolute(startAbs, endAbs);
+-      this.pendingOperator = null;
++    if (data === "w" || data === "W") {
++      const semanticClass: WordTextObjectClass = data === "W" ? "WORD" : "word";
++      const count = this.takeTotalCount(1);
++      const range = this.getWordObjectRange(pendingTextObject, count, semanticClass);
++      if (!range || !this.pendingOperator) {
++        this.pendingOperator = null;
++        return;
++      }
++
++      this.applyResolvedTextObjectRange(range);
+       return;
+     }
+ 
+-    if (this.pendingOperator === "c") {
+-      this.deleteRangeByAbsolute(startAbs, endAbs);
+-      this.pendingOperator = null;
+-      this.mode = "insert";
++    if (hasCount) {
++      this.cancelPendingOperator(data);
+       return;
+     }
+ 
+-    if (this.pendingOperator === "y") {
+-      this.yankRangeByAbsolute(startAbs, endAbs);
+-      this.pendingOperator = null;
++    const range = resolveDelimitedTextObjectRange(
++      this.getText(),
++      this.getDelimitedTextObjectCursorAbs(),
++      pendingTextObject,
++      data,
++    );
++    if (!range) {
++      this.cancelPendingOperator(data);
+       return;
+     }
+ 
++    this.applyResolvedTextObjectRange(range);
++  }
++
++  private applyResolvedTextObjectRange(range: TextObjectRange): void {
++    const pendingOperator = this.pendingOperator;
+     this.pendingOperator = null;
++
++    if (!pendingOperator || range.endAbs < range.startAbs) return;
++
++    if (range.endAbs === range.startAbs) {
++      if (pendingOperator === "c") {
++        this.moveCursorToAbsoluteIndex(range.startAbs);
++        this.mode = "insert";
++      }
++      return;
++    }
++
++    if (pendingOperator === "d") {
++      this.deleteRangeByAbsolute(range.startAbs, range.endAbs);
++      return;
++    }
++
++    if (pendingOperator === "c") {
++      this.deleteRangeByAbsolute(range.startAbs, range.endAbs);
++      this.mode = "insert";
++      return;
++    }
++
++    if (pendingOperator === "y") {
++      this.yankRangeByAbsolute(range.startAbs, range.endAbs);
++    }
+   }
+ 
+   private handlePendingDelete(data: string): void {
+@@ -986,6 +1708,11 @@ export class ModalEditor extends CustomEditor {
+       return;
+     }
+ 
++    if (data === ":") {
++      this.startPendingExCommand();
++      return;
++    }
++
+     if (data === "G") {
+       this.moveCursorToBufferEnd();
+       return;
+@@ -1073,19 +1800,36 @@ export class ModalEditor extends CustomEditor {
+       this.moveCursorToFirstNonWhitespace();
+       return;
+     }
+-
+-    if (data === "w") {
+-      const count = this.takeTotalCount(1);
+-      return this.moveWord("forward", "start", count, "word");
++
++    if (data === "w") {
++      const count = this.takeTotalCount(1);
++      this.moveWord("forward", "start", count, "word");
++      return;
++    }
++    if (data === "b") {
++      this.moveWord("backward", "start", this.takeTotalCount(1), "word");
++      return;
++    }
++    if (data === "e") {
++      this.moveWord("forward", "end", this.takeTotalCount(1), "word");
++      return;
++    }
++    if (data === "W") {
++      this.moveWord("forward", "start", this.takeTotalCount(1), "WORD");
++      return;
++    }
++    if (data === "B") {
++      this.moveWord("backward", "start", this.takeTotalCount(1), "WORD");
++      return;
++    }
++    if (data === "E") {
++      this.moveWord("forward", "end", this.takeTotalCount(1), "WORD");
++      return;
+     }
+-    if (data === "b") return this.moveWord("backward", "start", this.takeTotalCount(1), "word");
+-    if (data === "e") return this.moveWord("forward", "end", this.takeTotalCount(1), "word");
+-    if (data === "W") return this.moveWord("forward", "start", this.takeTotalCount(1), "WORD");
+-    if (data === "B") return this.moveWord("backward", "start", this.takeTotalCount(1), "WORD");
+-    if (data === "E") return this.moveWord("forward", "end", this.takeTotalCount(1), "WORD");
+ 
+     if (Object.hasOwn(NORMAL_KEYS, data)) {
+-      return this.handleMappedKey(data);
++      this.handleMappedKey(data);
++      return;
+     }
+ 
+     // Pass control sequences (ctrl+c, etc.) to super, ignore printable chars
+@@ -1345,13 +2089,14 @@ export class ModalEditor extends CustomEditor {
+       for (let i = 0; i < steps; i++) {
+         if (currentLine >= state.lines.length - 1) break;
+ 
+-        const left = state.lines[currentLine]!;
+-        const right = state.lines[currentLine + 1]!;
++        const left = state.lines[currentLine] ?? "";
++        const right = state.lines[currentLine + 1] ?? "";
+         let joined: string;
+ 
+         if (normalize) {
+           const trimmedRight = right.trimStart();
+-          const leftEndsWithSpace = left.length > 0 && /\s/.test(left[left.length - 1]!);
++          const leftLastChar = left[left.length - 1];
++          const leftEndsWithSpace = leftLastChar !== undefined && /\s/.test(leftLastChar);
+           const needsSeparator = !leftEndsWithSpace && trimmedRight.length > 0;
+           joined = needsSeparator ? `${left} ${trimmedRight}` : left + trimmedRight;
+           joinPoint = left.length;
+@@ -1412,6 +2157,18 @@ export class ModalEditor extends CustomEditor {
+     return this.getAbsoluteIndex(cursor.line, cursor.col);
+   }
+ 
++  private getDelimitedTextObjectCursorAbs(): number {
++    const lines = this.getLines();
++    const cursor = this.getCursor();
++    const line = lines[cursor.line] ?? "";
++
++    if (line.length > 0 && cursor.col >= line.length) {
++      return this.getAbsoluteIndex(cursor.line, line.length - 1);
++    }
++
++    return this.getAbsoluteIndex(cursor.line, cursor.col);
++  }
++
+   private findWordTargetInText(
+     text: string,
+     abs: number,
+@@ -1619,11 +2376,18 @@ export class ModalEditor extends CustomEditor {
+     }
+   }
+ 
+-  private writeToRegister(text: string): void {
++  private shouldMirrorRegisterWrite(source: RegisterWriteSource): boolean {
++    if (this.clipboardMirrorPolicy === "never") return false;
++    if (this.clipboardMirrorPolicy === "yank") return source === "yank";
++    return true;
++  }
++
++  private writeToRegister(text: string, source: RegisterWriteSource = "mutation"): void {
+     this.unnamedRegister = text;
+     if (!text) return;
++    if (!this.shouldMirrorRegisterWrite(source)) return;
+ 
+-    void this.clipboardFn(text).catch(() => {});
++    this.clipboardMirror.mirror(text);
+   }
+ 
+   private getCurrentLineAndCol(): { line: string; col: number } {
+@@ -1653,9 +2417,13 @@ export class ModalEditor extends CustomEditor {
+       endIndex = segments.length - 1;
+     }
+ 
++    const startSegment = segments[startIndex];
++    const endSegment = segments[endIndex];
++    if (!startSegment || !endSegment) return null;
++
+     return {
+-      start: segments[startIndex]!.start,
+-      end: segments[endIndex]!.end,
++      start: startSegment.start,
++      end: endSegment.end,
+     };
+   }
+ 
+@@ -1775,7 +2543,7 @@ export class ModalEditor extends CustomEditor {
+ 
+   private yankLineRange(startLine: number, endLine: number): void {
+     if (this.getLines().length === 0) return;
+-    this.writeToRegister(this.getLinewisePayload(startLine, endLine));
++    this.writeToRegister(this.getLinewisePayload(startLine, endLine), "yank");
+   }
+ 
+   private deleteLinewiseByDelta(delta: number): void {
+@@ -1913,14 +2681,14 @@ export class ModalEditor extends CustomEditor {
+       return;
+     }
+ 
+-    if (this.prefixCount.length > 0 || this.operatorCount.length > 0) {
+-      // Counted forms beyond yy, y{count}j/k, and y{count}{f/F/t/T} are out of scope.
+-      this.cancelPendingOperator(data);
++    if (data === "i" || data === "a") {
++      this.pendingTextObject = data;
+       return;
+     }
+ 
+-    if (data === "i" || data === "a") {
+-      this.pendingTextObject = data;
++    if (this.hasPendingCount()) {
++      // Counted forms beyond yy, y{count}j/k, and y{count}{f/F/t/T} are out of scope.
++      this.cancelPendingOperator(data);
+       return;
+     }
+ 
+@@ -2010,7 +2778,7 @@ export class ModalEditor extends CustomEditor {
+     if (end <= start) return;
+ 
+     // Yank only — no cursor movement, no text mutation
+-    this.writeToRegister(line.slice(start, end));
++    this.writeToRegister(line.slice(start, end), "yank");
+   }
+ 
+   private yankRangeByAbsolute(currentAbs: number, targetAbs: number, inclusive: boolean = false): void {
+@@ -2019,7 +2787,7 @@ export class ModalEditor extends CustomEditor {
+     const rawEnd = Math.max(currentAbs, targetAbs) + (inclusive ? 1 : 0);
+     const end = Math.min(rawEnd, text.length);
+     if (end <= start) return;
+-    this.writeToRegister(text.slice(start, end));
++    this.writeToRegister(text.slice(start, end), "yank");
+   }
+ 
+   private getCursorFromAbsoluteIndex(text: string, abs: number): { line: number; col: number } {
+@@ -2077,73 +2845,43 @@ export class ModalEditor extends CustomEditor {
+   }
+ 
+   private getWordObjectRange(
+-    kind: "i" | "a",
++    kind: TextObjectKind,
+     count: number = 1,
+-  ): { startAbs: number; endAbs: number } | null {
++    semanticClass: WordTextObjectClass = "word",
++  ): TextObjectRange | null {
+     const lines = this.getLines();
+     const cursor = this.getCursor();
+     const line = lines[cursor.line] ?? "";
+-    if (!line) return null;
+-
+-    const steps = Math.max(1, Math.min(MAX_COUNT, count));
+-    const hasWordChar = (idx: number) => idx >= 0 && idx < line.length && this.isWordChar(line[idx]!);
+-
+-    let col = Math.min(cursor.col, Math.max(0, line.length - 1));
+-
+-    if (!hasWordChar(col)) {
+-      let right = col;
+-      while (right < line.length && !hasWordChar(right)) right++;
+-      if (right < line.length) {
+-        col = right;
+-      } else {
+-        let left = Math.min(col, line.length - 1);
+-        while (left >= 0 && !hasWordChar(left)) left--;
+-        if (left < 0) return null;
+-        col = left;
+-      }
+-    }
+-
+-    let start = col;
+-    while (start > 0 && hasWordChar(start - 1)) start--;
+-
+-    let end = col + 1;
+-    while (end < line.length && hasWordChar(end)) end++;
++    const lineStartAbs = this.getAbsoluteIndex(cursor.line, 0);
+ 
+-    let remaining = steps - 1;
+-    while (remaining > 0) {
+-      let nextWordStart = end;
+-      while (nextWordStart < line.length && !hasWordChar(nextWordStart)) nextWordStart++;
+-      if (nextWordStart >= line.length) break;
++    return resolveWordTextObjectRange(
++      line,
++      lineStartAbs,
++      cursor.col,
++      kind,
++      count,
++      semanticClass,
++    );
++  }
+ 
+-      let nextWordEnd = nextWordStart + 1;
+-      while (nextWordEnd < line.length && hasWordChar(nextWordEnd)) nextWordEnd++;
++  private static readonly PUT_SIZE_LIMIT = 512 * 1024; // 512 KB safety cap
+ 
+-      end = nextWordEnd;
+-      remaining--;
++  private getPasteRegisterText(): string {
++    if (this.clipboardMirror.hasPendingWrite()) {
++      return this.unnamedRegister;
+     }
+ 
+-    if (kind === "a") {
+-      let aroundEnd = end;
+-      while (aroundEnd < line.length && /\s/.test(line[aroundEnd]!)) aroundEnd++;
+-
+-      if (aroundEnd > end) {
+-        end = aroundEnd;
+-      } else {
+-        while (start > 0 && /\s/.test(line[start - 1]!)) start--;
+-      }
++    try {
++      const clipboardText = this.clipboardReadFn();
++      return clipboardText ?? this.unnamedRegister;
++    } catch {
++      return this.unnamedRegister;
+     }
+-
+-    return {
+-      startAbs: this.getAbsoluteIndex(cursor.line, start),
+-      endAbs: this.getAbsoluteIndex(cursor.line, end),
+-    };
+   }
+ 
+-  private static readonly PUT_SIZE_LIMIT = 512 * 1024; // 512 KB safety cap
+-
+   private putAfter(): void {
+     const count = this.takeTotalCount(1);
+-    const text = this.unnamedRegister;
++    const text = this.getPasteRegisterText();
+     if (!text) return;
+     const safeCount = Math.min(count, Math.max(1, Math.floor(ModalEditor.PUT_SIZE_LIMIT / text.length)));
+ 
+@@ -2173,7 +2911,7 @@ export class ModalEditor extends CustomEditor {
+ 
+   private putBefore(): void {
+     const count = this.takeTotalCount(1);
+-    const text = this.unnamedRegister;
++    const text = this.getPasteRegisterText();
+     if (!text) return;
+     const safeCount = Math.min(count, Math.max(1, Math.floor(ModalEditor.PUT_SIZE_LIMIT / text.length)));
+ 
+@@ -2215,24 +2953,112 @@ export class ModalEditor extends CustomEditor {
+     this.deleteRangeByAbsolute(lineStartAbs + start, lineStartAbs + end);
+   }
+ 
++  private takeModeLabelSuffix(rawLabel: string, width: number): string {
++    if (width <= 0) return "";
++
++    const graphemes = getLineGraphemes(rawLabel);
++    const suffix: string[] = [];
++    let usedWidth = 0;
++
++    for (let i = graphemes.length - 1; i >= 0; i--) {
++      const grapheme = graphemes[i];
++      if (!grapheme) continue;
++
++      const segment = rawLabel.slice(grapheme.start, grapheme.end);
++      const segmentWidth = visibleWidth(segment);
++      if (usedWidth + segmentWidth > width) break;
++      suffix.push(segment);
++      usedWidth += segmentWidth;
++    }
++
++    return suffix.reverse().join("");
++  }
++
++  private fitModeLabel(rawLabel: string, width: number): string {
++    if (visibleWidth(rawLabel) <= width) return rawLabel;
++
++    const prefix = rawLabel.startsWith(" INSERT ")
++      ? " INSERT "
++      : rawLabel.startsWith(" NORMAL ")
++        ? " NORMAL "
++        : rawLabel.startsWith(" EX ")
++          ? " EX "
++          : "";
++
++    if (!prefix || visibleWidth(prefix) >= width) {
++      return truncateToWidth(rawLabel, width, "");
++    }
++
++    const suffixWidth = width - visibleWidth(prefix) - 1;
++    if (suffixWidth <= 0) return `${prefix}…`;
++    return `${prefix}…${this.takeModeLabelSuffix(rawLabel, suffixWidth)}`;
++  }
++
++  private getDesiredCursorShapeSequence(): CursorShapeSequence {
++    return this.mode === "insert" && this.pendingExCommand === null
++      ? INSERT_CURSOR_SHAPE
++      : BLOCK_CURSOR_SHAPE;
++  }
++
++  private hasPromptCursorMarker(lines: string[]): boolean {
++    return lines.some((line) => line.includes(CURSOR_MARKER));
++  }
++
++  private stripSoftwareCursorWhenHardwareCursorIsUsed(lines: string[]): void {
++    for (let i = lines.length - 1; i >= 0; i--) {
++      const line = lines[i];
++      if (!line?.includes(CURSOR_MARKER)) continue;
++
++      lines[i] = stripSoftwareCursorAfterMarker(line);
++      return;
++    }
++  }
++
++  private syncCursorShapeForRender(lines: string[]): void {
++    if (!this.cursorShapeRuntime) return;
++    if (!this.hasPromptCursorMarker(lines)) return;
++
++    if (this.cursorShapeRuntime.getShowHardwareCursor?.() === false) {
++      this.lastCursorShapeSequence = null;
++      return;
++    }
++
++    this.stripSoftwareCursorWhenHardwareCursorIsUsed(lines);
++
++    const sequence = this.getDesiredCursorShapeSequence();
++    if (sequence === this.lastCursorShapeSequence) return;
++
++    this.cursorShapeRuntime.writeCursorShape(sequence);
++    this.lastCursorShapeSequence = sequence;
++  }
++
+   render(width: number): string[] {
+     const lines = super.render(width);
++    this.syncCursorShapeForRender(lines);
+     if (lines.length === 0) return lines;
+ 
+-    const rawLabel = this.getModeLabel();
+-    const colorize = this.labelColorizers
+-      ? (this.mode === "insert" ? this.labelColorizers.insert : this.labelColorizers.normal)
+-      : null;
++    const rawLabel = this.fitModeLabel(this.getModeLabel(), width);
++    const colorize = this.getModeLabelColorizer();
+     const label = colorize ? colorize(rawLabel) : rawLabel;
+     const last = lines.length - 1;
+-    if (visibleWidth(lines[last]!) >= visibleWidth(rawLabel)) {
+-      lines[last] = truncateToWidth(lines[last]!, width - visibleWidth(rawLabel), "") + label;
++    const lastLine = lines[last];
++    if (lastLine && visibleWidth(lastLine) >= visibleWidth(rawLabel)) {
++      lines[last] = truncateToWidth(lastLine, width - visibleWidth(rawLabel), "") + label;
++    } else {
++      lines[last] = label;
+     }
+     return lines;
+   }
+ 
++  private getModeLabelColorizer(): ((s: string) => string) | null {
++    if (!this.labelColorizers) return null;
++    if (this.pendingExCommand !== null) return this.labelColorizers.ex;
++    return this.mode === "insert" ? this.labelColorizers.insert : this.labelColorizers.normal;
++  }
++
+   private getModeLabel(): string {
+     if (this.mode === "insert") return " INSERT ";
++    if (this.pendingExCommand !== null) return ` EX ${this.pendingExCommand}_ `;
+ 
+     const prefixCount = this.prefixCount;
+     const operatorCount = this.operatorCount;
+@@ -2259,13 +3085,477 @@ export class ModalEditor extends CustomEditor {
+   }
+ }
+ 
++function clampVimeeCursor(cursor: CursorPosition, lines: string[]): CursorPosition {
++  const line = Math.max(0, Math.min(cursor.line, Math.max(0, lines.length - 1)));
++  const col = Math.max(0, Math.min(cursor.col, lines[line]?.length ?? 0));
++  return { line, col };
++}
++
++function createInitialInsertContext(cursor: CursorPosition): VimContext {
++  return {
++    ...createInitialContext(cursor),
++    mode: "insert",
++    statusMessage: "-- INSERT --",
++  };
++}
++
++function normalizeVimeeKey(data: string): { key: string; ctrlKey: boolean } | null {
++  if (matchesKey(data, "escape") || matchesKey(data, "ctrl+[")) return { key: "Escape", ctrlKey: false };
++  if (matchesKey(data, "enter") || data === "\r" || data === "\n") return { key: "Enter", ctrlKey: false };
++  if (matchesKey(data, "backspace") || data === "\x7f" || data === "\b") return { key: "Backspace", ctrlKey: false };
++  if (matchesKey(data, "delete") || data === "\x1b[3~") return { key: "Delete", ctrlKey: false };
++  if (matchesKey(data, "tab") || data === "\t") return { key: "Tab", ctrlKey: false };
++  if (data === CTRL_R) return { key: "r", ctrlKey: true };
++  if (data === "\x16") return { key: "v", ctrlKey: true };
++  if (data === "\x17") return { key: "w", ctrlKey: true };
++  if (data === "\x04") return { key: "d", ctrlKey: true };
++  if (data.length === 1 && data >= " " && data !== "\x7f") return { key: data, ctrlKey: false };
++  return null;
++}
++
++class VimeeModalEditor extends CustomEditor {
++  readonly __piVimModalEditorBrand = true;
++
++  private buffer: TextBuffer;
++  private vim: VimContext;
++  private readonly labelColorizers: ModeLabelColorizers | null;
++  private readonly cursorShapeRuntime: CursorShapeRuntime | null;
++  private lastCursorShapeSequence: CursorShapeSequence | null = null;
++  private insertSessionUndoSaved: boolean = false;
++  private unnamedRegister: string = "";
++  private clipboardMirrorPolicy: ClipboardMirrorPolicy = DEFAULT_CLIPBOARD_MIRROR_POLICY;
++  private readonly clipboardMirror = new ClipboardMirror(writeClipboardInChildProcess);
++  private quitFn: () => void = () => {};
++  private notifyFn: (message: string) => void = () => {};
++
++  constructor(
++    tui: CustomEditorConstructorArgs[0],
++    theme: CustomEditorConstructorArgs[1],
++    kb: CustomEditorConstructorArgs[2],
++    labelColorizers?: ModeLabelColorizers | null,
++  ) {
++    super(tui, theme, kb);
++    this.buffer = new TextBuffer(this.getText());
++    this.vim = createInitialInsertContext(this.getCursor());
++    this.labelColorizers = labelColorizers ?? null;
++    this.cursorShapeRuntime = getCursorShapeRuntime(tui);
++  }
++
++  setClipboardMirrorPolicy(policy: ClipboardMirrorPolicy): void {
++    this.clipboardMirrorPolicy = policy;
++  }
++
++  getClipboardMirrorPolicy(): ClipboardMirrorPolicy {
++    return this.clipboardMirrorPolicy;
++  }
++
++  setQuitFn(fn: () => void): void { this.quitFn = fn; }
++  setNotifyFn(fn: (message: string) => void): void { this.notifyFn = fn; }
++  getMode(): Mode { return this.vim.mode === "insert" ? "insert" : "normal"; }
++  getRegister(): string { return this.unnamedRegister || this.vim.register; }
++  setRegister(text: string): void {
++    this.unnamedRegister = text;
++    this.vim = { ...this.vim, register: text };
++  }
++
++  override setText(text: string): void {
++    super.setText(text);
++    this.buffer = new TextBuffer(this.getText());
++    this.vim = createInitialInsertContext(this.getCursor());
++  }
++
++  private syncVimeeFromBase(): void {
++    const text = this.getText();
++    if (this.buffer.getContent() !== text) {
++      this.buffer.replaceContent(text);
++    }
++    const cursor = clampVimeeCursor(this.getCursor(), this.getLines());
++    this.vim = { ...this.vim, cursor };
++  }
++
++  private syncBaseFromVimee(): void {
++    const editor = this as unknown as ModalEditorInternals;
++    if (!editor.state || !Array.isArray(editor.state.lines)) return;
++
++    const text = this.buffer.getContent();
++    const lines = text.split("\n");
++    const cursor = clampVimeeCursor(this.vim.cursor, lines);
++    editor.state.lines = lines.length > 0 ? lines : [""];
++    editor.state.cursorLine = cursor.line;
++    if (typeof editor.setCursorCol === "function") {
++      editor.setCursorCol(cursor.col);
++    } else {
++      editor.state.cursorCol = cursor.col;
++      editor.preferredVisualCol = null;
++    }
++    editor.onChange?.(this.getText());
++    editor.tui?.requestRender?.();
++  }
++
++  private ensureInsertUndoPoint(): void {
++    if (this.insertSessionUndoSaved) return;
++    this.syncVimeeFromBase();
++    this.buffer.saveUndoPoint(this.vim.cursor);
++    this.insertSessionUndoSaved = true;
++  }
++
++  private processVimeeKey(key: string, ctrlKey = false): void {
++    this.syncVimeeFromBase();
++    const previousMode = this.vim.mode;
++    const result = processKeystroke(key, this.vim, this.buffer, ctrlKey);
++    this.vim = result.newCtx;
++    if (previousMode === "insert" && this.vim.mode !== "insert") {
++      this.insertSessionUndoSaved = false;
++    }
++    this.handleVimeeActions(result.actions);
++    this.syncBaseFromVimee();
++  }
++
++  private handleVimeeActions(actions: VimAction[]): void {
++    for (const action of actions) {
++      switch (action.type) {
++        case "yank":
++        case "register-write":
++          this.recordRegisterWrite(action.text, action.type === "yank" ? "yank" : "mutation");
++          break;
++        case "quit":
++          if (action.force || this.getText().trim().length === 0) {
++            this.quitFn();
++          } else {
++            this.notifyFn("Prompt is not empty; use :q! to quit");
++          }
++          break;
++        default:
++          break;
++      }
++    }
++  }
++
++  private recordRegisterWrite(text: string, source: RegisterWriteSource): void {
++    this.unnamedRegister = text;
++    this.vim = { ...this.vim, register: text };
++    const shouldMirror = this.clipboardMirrorPolicy === "all"
++      || (this.clipboardMirrorPolicy === "yank" && source === "yank");
++    if (shouldMirror && text.length > 0) {
++      this.clipboardMirror.mirror(text);
++    }
++  }
++
++  override handleInput(data: string): void {
++    const normalized = normalizeVimeeKey(data);
++
++    if (this.vim.mode === "insert") {
++      if (normalized?.key === "Escape") {
++        this.processVimeeKey("Escape");
++        return;
++      }
++
++      // Preserve Pi's base editor behavior in Insert mode, including the `/` and
++      // `@` autocomplete popups. vimee owns modal state; the base editor owns
++      // text entry and popup-triggering printable input.
++      this.ensureInsertUndoPoint();
++      super.handleInput(data);
++      this.syncVimeeFromBase();
++      return;
++    }
++
++    if (!normalized) {
++      super.handleInput(data);
++      this.syncVimeeFromBase();
++      return;
++    }
++
++    if (normalized.key === "Escape" && this.vim.mode === "normal" && this.vim.phase === "idle") {
++      super.handleInput(data);
++      this.syncVimeeFromBase();
++      return;
++    }
++
++    this.processVimeeKey(normalized.key, normalized.ctrlKey);
++  }
++
++  private getDesiredCursorShapeSequence(): CursorShapeSequence {
++    return this.vim.mode === "insert" ? INSERT_CURSOR_SHAPE : BLOCK_CURSOR_SHAPE;
++  }
++
++  private hasPromptCursorMarker(lines: string[]): boolean {
++    return lines.some((line) => line.includes(CURSOR_MARKER));
++  }
++
++  private syncCursorShapeForRender(lines: string[]): void {
++    if (!this.cursorShapeRuntime) return;
++    if (!this.hasPromptCursorMarker(lines)) return;
++
++    if (this.cursorShapeRuntime.getShowHardwareCursor?.() === false) {
++      this.lastCursorShapeSequence = null;
++      return;
++    }
++
++    // When hardware cursor support is available, remove the base editor's
++    // reverse-video software cursor in every mode. Otherwise insert mode would
++    // still look like a block despite emitting the DECSCUSR vertical-bar shape.
++    this.stripSoftwareCursorWhenHardwareCursorIsUsed(lines);
++
++    const sequence = this.getDesiredCursorShapeSequence();
++    if (sequence === this.lastCursorShapeSequence) return;
++    this.cursorShapeRuntime.writeCursorShape(sequence);
++    this.lastCursorShapeSequence = sequence;
++  }
++
++  private stripSoftwareCursorWhenHardwareCursorIsUsed(lines: string[]): void {
++    for (let i = lines.length - 1; i >= 0; i--) {
++      const line = lines[i];
++      if (!line?.includes(CURSOR_MARKER)) continue;
++
++      lines[i] = stripSoftwareCursorAfterMarker(line);
++      return;
++    }
++  }
++
++  override render(width: number): string[] {
++    const lines = super.render(width);
++    this.syncCursorShapeForRender(lines);
++    this.applyVisualHighlights(lines, width);
++    if (lines.length === 0) return lines;
++
++    const rawLabel = this.fitModeLabel(this.getModeLabel(), width);
++    const colorize = this.getModeLabelColorizer();
++    const label = colorize ? colorize(rawLabel) : rawLabel;
++    const last = lines.length - 1;
++    const lastLine = lines[last];
++    if (lastLine && visibleWidth(lastLine) >= visibleWidth(rawLabel)) {
++      lines[last] = truncateToWidth(lastLine, width - visibleWidth(rawLabel), "") + label;
++    } else {
++      lines[last] = label;
++    }
++    return lines;
++  }
++
++  private applyVisualHighlights(renderedLines: string[], width: number): void {
++    if (!this.vim.mode.startsWith("visual")) return;
++    if (!this.vim.visualAnchor) return;
++    if (renderedLines.length <= 2) return;
++
++    const layoutWidth = this.getEditorLayoutWidth(width);
++    const spans = this.buildLayoutSpans(layoutWidth);
++    const editor = this as unknown as ModalEditorInternals;
++    const scrollOffset = Math.max(0, editor.scrollOffset ?? 0);
++    const visibleSpanCount = Math.min(spans.length - scrollOffset, renderedLines.length - 2);
++    const paddingX = this.getEffectivePaddingX(width);
++
++    for (let i = 0; i < visibleSpanCount; i++) {
++      const span = spans[scrollOffset + i];
++      if (!span) continue;
++
++      const highlight = this.getVisualHighlightForSpan(span);
++      if (!highlight || highlight.start >= highlight.end) continue;
++
++      const renderedIndex = i + 1;
++      const rendered = renderedLines[renderedIndex];
++      if (rendered === undefined) continue;
++
++      renderedLines[renderedIndex] = this.highlightRenderedContent(
++        rendered,
++        paddingX,
++        highlight.start - span.startCol,
++        highlight.end - span.startCol,
++      );
++    }
++  }
++
++  private getEffectivePaddingX(width: number): number {
++    const maxPadding = Math.max(0, Math.floor((width - 1) / 2));
++    return Math.min(this.getPaddingX(), maxPadding);
++  }
++
++  private getEditorLayoutWidth(width: number): number {
++    const paddingX = this.getEffectivePaddingX(width);
++    const contentWidth = Math.max(1, width - paddingX * 2);
++    return Math.max(1, contentWidth - (paddingX ? 0 : 1));
++  }
++
++  private buildLayoutSpans(layoutWidth: number): LayoutSpan[] {
++    const spans: LayoutSpan[] = [];
++    const lines = this.getLines();
++    if (lines.length === 0 || (lines.length === 1 && lines[0] === "")) {
++      return [{ logicalLine: 0, startCol: 0, endCol: 0 }];
++    }
++
++    for (let logicalLine = 0; logicalLine < lines.length; logicalLine++) {
++      const line = lines[logicalLine] ?? "";
++      if (visibleWidth(line) <= layoutWidth) {
++        spans.push({ logicalLine, startCol: 0, endCol: line.length });
++        continue;
++      }
++
++      for (const chunk of this.wrapLineForHighlighting(line, layoutWidth)) {
++        spans.push({ logicalLine, startCol: chunk.start, endCol: chunk.end });
++      }
++    }
++    return spans;
++  }
++
++  private wrapLineForHighlighting(line: string, maxWidth: number): Array<{ start: number; end: number }> {
++    const chunks: Array<{ start: number; end: number }> = [];
++    let start = 0;
++    let currentWidth = 0;
++    const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
++
++    for (const { segment, index } of segmenter.segment(line)) {
++      const width = Math.max(1, visibleWidth(segment));
++      if (currentWidth > 0 && currentWidth + width > maxWidth) {
++        chunks.push({ start, end: index });
++        start = index;
++        currentWidth = 0;
++      }
++      currentWidth += width;
++    }
++
++    chunks.push({ start, end: line.length });
++    return chunks;
++  }
++
++  private getVisualHighlightForSpan(span: LayoutSpan): VisualHighlightRange | null {
++    const anchor = this.vim.visualAnchor;
++    if (!anchor) return null;
++
++    const cursor = this.vim.cursor;
++    const lineText = this.getLines()[span.logicalLine] ?? "";
++
++    if (this.vim.mode === "visual-line") {
++      const startLine = Math.min(anchor.line, cursor.line);
++      const endLine = Math.max(anchor.line, cursor.line);
++      if (span.logicalLine < startLine || span.logicalLine > endLine) return null;
++      return {
++        start: span.startCol,
++        end: Math.max(span.endCol, span.startCol + Math.min(1, lineText.length)),
++      };
++    }
++
++    if (this.vim.mode === "visual-block") {
++      const startLine = Math.min(anchor.line, cursor.line);
++      const endLine = Math.max(anchor.line, cursor.line);
++      if (span.logicalLine < startLine || span.logicalLine > endLine) return null;
++      const startCol = Math.min(anchor.col, cursor.col);
++      const endCol = Math.max(anchor.col, cursor.col) + 1;
++      return this.intersectRange(span, { start: startCol, end: Math.min(endCol, lineText.length) });
++    }
++
++    const start = this.compareCursor(anchor, cursor) <= 0 ? anchor : cursor;
++    const end = start === anchor ? cursor : anchor;
++    if (span.logicalLine < start.line || span.logicalLine > end.line) return null;
++
++    const lineStart = span.logicalLine === start.line ? start.col : 0;
++    const lineEnd = span.logicalLine === end.line ? end.col + 1 : lineText.length;
++    return this.intersectRange(span, {
++      start: Math.min(lineStart, lineText.length),
++      end: Math.min(lineEnd, lineText.length),
++    });
++  }
++
++  private intersectRange(span: LayoutSpan, range: VisualHighlightRange): VisualHighlightRange | null {
++    const start = Math.max(span.startCol, range.start);
++    const end = Math.min(span.endCol, range.end);
++    return start < end ? { start, end } : null;
++  }
++
++  private compareCursor(a: CursorPosition, b: CursorPosition): number {
++    if (a.line !== b.line) return a.line - b.line;
++    return a.col - b.col;
++  }
++
++  private highlightRenderedContent(
++    line: string,
++    paddingX: number,
++    highlightStart: number,
++    highlightEnd: number,
++  ): string {
++    if (highlightStart >= highlightEnd) return line;
++
++    const contentStart = this.findRawIndexForPlainOffset(line, paddingX);
++    const rawStart = this.findRawIndexForPlainOffset(line, paddingX + highlightStart);
++    const rawEnd = this.findRawIndexForPlainOffset(line, paddingX + highlightEnd);
++    if (rawStart < contentStart || rawStart >= rawEnd) return line;
++
++    return `${line.slice(0, rawStart)}\x1b[7m${line.slice(rawStart, rawEnd)}\x1b[27m${line.slice(rawEnd)}`;
++  }
++
++  private findRawIndexForPlainOffset(line: string, targetOffset: number): number {
++    let plainOffset = 0;
++    for (let rawIndex = 0; rawIndex < line.length;) {
++      if (line.startsWith(CURSOR_MARKER, rawIndex)) {
++        rawIndex += CURSOR_MARKER.length;
++        continue;
++      }
++      if (line[rawIndex] === "\x1b") {
++        const end = line.indexOf("m", rawIndex + 1);
++        if (end !== -1) {
++          rawIndex = end + 1;
++          continue;
++        }
++      }
++      if (plainOffset >= targetOffset) return rawIndex;
++      rawIndex++;
++      plainOffset++;
++    }
++    return line.length;
++  }
++
++  private fitModeLabel(label: string, width: number): string {
++    if (width <= 0) return "";
++    return visibleWidth(label) <= width ? label : truncateToWidth(label, width, "");
++  }
++
++  private getModeLabelColorizer(): ((s: string) => string) | null {
++    if (!this.labelColorizers) return null;
++    if (this.vim.mode === "command-line") return this.labelColorizers.ex;
++    return this.vim.mode === "insert" ? this.labelColorizers.insert : this.labelColorizers.normal;
++  }
++
++  private getModeLabel(): string {
++    if (this.vim.mode === "insert") return " INSERT ";
++    if (this.vim.mode === "command-line") {
++      return ` ${this.vim.commandType ?? ":"}${this.vim.commandBuffer}_ `;
++    }
++    const prefix = this.vim.count > 0 ? `${this.vim.count}` : "";
++    const pending = this.vim.phase !== "idle" ? ` ${this.vim.phase}` : "";
++    const visual = this.vim.mode.startsWith("visual") ? ` ${this.vim.mode.toUpperCase()} ` : " NORMAL ";
++    return prefix || pending ? `${visual}${prefix}${pending} ` : visual;
++  }
++}
++
+ export default function (pi: ExtensionAPI) {
++  let cursorShapeCleanup: CursorShapeCleanup | null = null;
++
+   pi.on("session_start", (_event, ctx) => {
++    const piVimSettings = readPiVimSettings(ctx.cwd);
++    const clipboardMirrorPolicy = resolveClipboardMirrorPolicy(piVimSettings.clipboardMirror);
++    if (clipboardMirrorPolicy.warning && ctx.hasUI) {
++      ctx.ui.notify(clipboardMirrorPolicy.warning, "warning");
++    }
++
+     const t = ctx.ui.theme;
++    const reverseVideo = (s: string) => `\x1b[7m${s}\x1b[27m`;
+     const colorizers = t ? {
+-      insert: (s: string) => t.fg("borderMuted", `\x1b[7m${s}\x1b[27m`),
+-      normal: (s: string) => t.fg("borderAccent", `\x1b[7m${s}\x1b[27m`),
++      insert: (s: string) => t.fg("borderMuted", reverseVideo(s)),
++      normal: (s: string) => t.fg("borderAccent", reverseVideo(s)),
++      ex: (s: string) => t.fg("warning", reverseVideo(s)),
+     } : null;
+-    ctx.ui.setEditorComponent((tui, theme, kb) => new ModalEditor(tui, theme, kb, colorizers));
++    ctx.ui.setEditorComponent((tui, theme, kb) => {
++      cursorShapeCleanup = enableCursorShapeSupport(tui);
++      const editor = new VimeeModalEditor(tui, theme, kb, colorizers);
++      editor.setClipboardMirrorPolicy(clipboardMirrorPolicy.policy);
++      editor.setQuitFn(() => ctx.shutdown());
++      editor.setNotifyFn((message) => ctx.ui.notify(message, "warning"));
++      return editor;
++    });
++  });
++
++  pi.on("session_shutdown", () => {
++    try {
++      cursorShapeCleanup?.();
++    } finally {
++      cursorShapeCleanup = null;
++    }
+   });
+ }
+diff --git a/node_modules/pi-vim/motions.ts b/node_modules/pi-vim/motions.ts
+index 52e912f..08926d4 100644
+--- a/node_modules/pi-vim/motions.ts
++++ b/node_modules/pi-vim/motions.ts
+@@ -175,7 +175,8 @@ export function findCharMotionTarget(
+       const nextIndex = currentIndex + 1 + tillRepeatOffset;
+       let found = -1;
+       for (let j = nextIndex; j < graphemes.length; j++) {
+-        const g = graphemes[j]!;
++        const g = graphemes[j];
++        if (!g) continue;
+         // Use startsWith to allow matching base chars if targetChar lacks combining marks,
+         // or just exact match since targetChar is typically a full grapheme.
+         if (line.slice(g.start, g.end) === targetChar || line.slice(g.start, g.end).startsWith(targetChar)) {
+@@ -184,13 +185,20 @@ export function findCharMotionTarget(
+         }
+       }
+       if (found === -1) return null;
+-      if (isFinal) return isTill ? graphemes[found - 1]!.start : graphemes[found]!.start;
++      if (isFinal) {
++        const targetGrapheme = graphemes[found];
++        if (!targetGrapheme) return null;
++        if (!isTill) return targetGrapheme.start;
++        const previousGrapheme = graphemes[found - 1];
++        return previousGrapheme ? previousGrapheme.start : null;
++      }
+       currentIndex = found;
+     } else {
+       const nextIndex = currentIndex - 1 - tillRepeatOffset;
+       let found = -1;
+       for (let j = nextIndex; j >= 0; j--) {
+-        const g = graphemes[j]!;
++        const g = graphemes[j];
++        if (!g) continue;
+         if (line.slice(g.start, g.end) === targetChar || line.slice(g.start, g.end).startsWith(targetChar)) {
+           found = j;
+           break;
+@@ -198,7 +206,9 @@ export function findCharMotionTarget(
+       }
+       if (found === -1) return null;
+       if (isFinal) {
+-        if (!isTill) return graphemes[found]!.start;
++        const targetGrapheme = graphemes[found];
++        if (!targetGrapheme) return null;
++        if (!isTill) return targetGrapheme.start;
+         const afterTarget = graphemes[found + 1];
+         return afterTarget ? afterTarget.start : line.length;
+       }
+diff --git a/node_modules/pi-vim/text-objects.ts b/node_modules/pi-vim/text-objects.ts
+new file mode 100644
+index 0000000..4d55143
+--- /dev/null
++++ b/node_modules/pi-vim/text-objects.ts
+@@ -0,0 +1,303 @@
++export type TextObjectKind = "i" | "a";
++
++export type TextObjectRange = {
++  startAbs: number;
++  endAbs: number;
++};
++
++export type WordTextObjectClass = "word" | "WORD";
++
++export type DelimiterSpec = {
++  type: "quote" | "bracket";
++  open: string;
++  close: string;
++};
++
++function normalizeCount(count: number): number {
++  if (!Number.isFinite(count) || count < 1) return 1;
++  return Math.floor(count);
++}
++
++function clampCursorCol(line: string, cursorCol: number): number {
++  if (line.length === 0) return 0;
++  if (!Number.isFinite(cursorCol)) return 0;
++
++  const normalized = Math.trunc(cursorCol);
++  return Math.max(0, Math.min(normalized, line.length - 1));
++}
++
++function clampCursorAbs(text: string, cursorAbs: number): number {
++  if (text.length === 0) return 0;
++  if (!Number.isFinite(cursorAbs)) return 0;
++
++  const normalized = Math.trunc(cursorAbs);
++  return Math.max(0, Math.min(normalized, text.length - 1));
++}
++
++function findLogicalLineBounds(line: string, cursorCol: number): { start: number; end: number } {
++  if (line.length === 0) return { start: 0, end: 0 };
++
++  const previousSearchStart = line[cursorCol] === "\n" ? cursorCol - 1 : cursorCol;
++  const start = line.lastIndexOf("\n", previousSearchStart) + 1;
++  const nextNewline = line.indexOf("\n", cursorCol);
++
++  return {
++    start,
++    end: nextNewline === -1 ? line.length : nextNewline,
++  };
++}
++
++function findCurrentLineBounds(text: string, cursorAbs: number): { startAbs: number; endAbs: number } {
++  const cursor = clampCursorAbs(text, cursorAbs);
++  const bounds = findLogicalLineBounds(text, cursor);
++
++  return {
++    startAbs: bounds.start,
++    endAbs: bounds.end,
++  };
++}
++
++function isWordTextObjectChar(ch: string | undefined, semanticClass: WordTextObjectClass): boolean {
++  if (ch === undefined) return false;
++  if (semanticClass === "WORD") return !/\s/.test(ch);
++  return /\w/.test(ch);
++}
++
++function isWhitespace(ch: string | undefined): boolean {
++  return ch !== undefined && /\s/.test(ch);
++}
++
++export function normalizeDelimiterKey(key: string): DelimiterSpec | null {
++  if (key === "\"" || key === "'" || key === "`") {
++    return {
++      type: "quote",
++      open: key,
++      close: key,
++    };
++  }
++
++  if (key === "(" || key === ")" || key === "b") {
++    return {
++      type: "bracket",
++      open: "(",
++      close: ")",
++    };
++  }
++
++  if (key === "[" || key === "]") {
++    return {
++      type: "bracket",
++      open: "[",
++      close: "]",
++    };
++  }
++
++  if (key === "{" || key === "}" || key === "B") {
++    return {
++      type: "bracket",
++      open: "{",
++      close: "}",
++    };
++  }
++
++  return null;
++}
++
++export function isEscapedDelimiter(text: string, index: number): boolean {
++  if (!Number.isInteger(index) || index <= 0 || index >= text.length) return false;
++
++  let backslashCount = 0;
++  for (let i = index - 1; i >= 0 && text[i] === "\\"; i--) {
++    backslashCount++;
++  }
++
++  return backslashCount % 2 === 1;
++}
++
++export function resolveQuoteObjectRange(
++  text: string,
++  cursorAbs: number,
++  kind: TextObjectKind,
++  quote: string,
++): TextObjectRange | null {
++  const spec = normalizeDelimiterKey(quote);
++  if (spec?.type !== "quote") return null;
++
++  const cursor = clampCursorAbs(text, cursorAbs);
++  const bounds = findCurrentLineBounds(text, cursor);
++  if (bounds.startAbs >= bounds.endAbs) return null;
++
++  let openIndex: number | null = null;
++  let bestPair: { open: number; close: number } | null = null;
++
++  for (let index = bounds.startAbs; index < bounds.endAbs; index++) {
++    if (text[index] !== quote || isEscapedDelimiter(text, index)) continue;
++
++    if (openIndex === null) {
++      openIndex = index;
++      continue;
++    }
++
++    const closeIndex = index;
++    if (openIndex <= cursor && cursor <= closeIndex) {
++      if (bestPair === null || closeIndex - openIndex < bestPair.close - bestPair.open) {
++        bestPair = { open: openIndex, close: closeIndex };
++      }
++    }
++    openIndex = null;
++  }
++
++  if (bestPair === null) return null;
++
++  if (kind === "i") {
++    return {
++      startAbs: bestPair.open + 1,
++      endAbs: bestPair.close,
++    };
++  }
++
++  return {
++    startAbs: bestPair.open,
++    endAbs: bestPair.close + 1,
++  };
++}
++
++export function resolveBracketObjectRange(
++  text: string,
++  cursorAbs: number,
++  kind: TextObjectKind,
++  open: string,
++  close: string,
++): TextObjectRange | null {
++  if (open.length !== 1 || close.length !== 1 || open === close) return null;
++
++  const cursor = clampCursorAbs(text, cursorAbs);
++  const openStack: number[] = [];
++  let bestPair: { open: number; close: number } | null = null;
++
++  for (let index = 0; index < text.length; index++) {
++    const ch = text[index];
++
++    if (ch === open) {
++      openStack.push(index);
++      continue;
++    }
++
++    if (ch !== close) continue;
++
++    const openIndex = openStack.pop();
++    if (openIndex === undefined) continue;
++
++    if (openIndex <= cursor && cursor <= index) {
++      if (bestPair === null || index - openIndex < bestPair.close - bestPair.open) {
++        bestPair = { open: openIndex, close: index };
++      }
++    }
++  }
++
++  if (bestPair === null) return null;
++
++  if (kind === "i") {
++    return {
++      startAbs: bestPair.open + 1,
++      endAbs: bestPair.close,
++    };
++  }
++
++  return {
++    startAbs: bestPair.open,
++    endAbs: bestPair.close + 1,
++  };
++}
++
++export function resolveDelimitedTextObjectRange(
++  text: string,
++  cursorAbs: number,
++  kind: TextObjectKind,
++  key: string,
++): TextObjectRange | null {
++  const spec = normalizeDelimiterKey(key);
++  if (spec === null) return null;
++
++  if (spec.type === "quote") {
++    return resolveQuoteObjectRange(text, cursorAbs, kind, spec.open);
++  }
++
++  if (spec.type === "bracket") {
++    return resolveBracketObjectRange(text, cursorAbs, kind, spec.open, spec.close);
++  }
++
++  return null;
++}
++
++export function resolveWordTextObjectRange(
++  line: string,
++  lineStartAbs: number,
++  cursorCol: number,
++  kind: TextObjectKind,
++  count: number = 1,
++  semanticClass: WordTextObjectClass = "word",
++): TextObjectRange | null {
++  if (line.length === 0) return null;
++
++  const cursor = clampCursorCol(line, cursorCol);
++  const bounds = findLogicalLineBounds(line, cursor);
++  if (bounds.start >= bounds.end) return null;
++
++  const hasWordChar = (idx: number) => (
++    idx >= bounds.start
++    && idx < bounds.end
++    && isWordTextObjectChar(line[idx], semanticClass)
++  );
++
++  let col = Math.max(bounds.start, Math.min(cursor, bounds.end - 1));
++
++  if (!hasWordChar(col)) {
++    let right = col;
++    while (right < bounds.end && !hasWordChar(right)) right++;
++
++    if (right < bounds.end) {
++      col = right;
++    } else {
++      let left = Math.min(col, bounds.end - 1);
++      while (left >= bounds.start && !hasWordChar(left)) left--;
++      if (left < bounds.start) return null;
++      col = left;
++    }
++  }
++
++  let start = col;
++  while (start > bounds.start && hasWordChar(start - 1)) start--;
++
++  let end = col + 1;
++  while (end < bounds.end && hasWordChar(end)) end++;
++
++  let remaining = normalizeCount(count) - 1;
++  while (remaining > 0) {
++    let nextWordStart = end;
++    while (nextWordStart < bounds.end && !hasWordChar(nextWordStart)) nextWordStart++;
++    if (nextWordStart >= bounds.end) break;
++
++    let nextWordEnd = nextWordStart + 1;
++    while (nextWordEnd < bounds.end && hasWordChar(nextWordEnd)) nextWordEnd++;
++
++    end = nextWordEnd;
++    remaining--;
++  }
++
++  if (kind === "a") {
++    let aroundEnd = end;
++    while (aroundEnd < bounds.end && isWhitespace(line[aroundEnd])) aroundEnd++;
++
++    if (aroundEnd > end) {
++      end = aroundEnd;
++    } else {
++      while (start > bounds.start && isWhitespace(line[start - 1])) start--;
++    }
++  }
++
++  return {
++    startAbs: lineStartAbs + start,
++    endAbs: lineStartAbs + end,
++  };
++}
+diff --git a/node_modules/pi-vim/word-boundary-cache.ts b/node_modules/pi-vim/word-boundary-cache.ts
+index 4148dcc..8855788 100644
+--- a/node_modules/pi-vim/word-boundary-cache.ts
++++ b/node_modules/pi-vim/word-boundary-cache.ts
+@@ -53,7 +53,7 @@ function buildWordBoundaryData(
+   }
+ 
+   for (let runStart = 0; runStart < len;) {
+-    const runType = charTypes[runStart]!;
++    const runType = charTypes[runStart] ?? CharType.Space;
+     let runEnd = runStart;
+     while (runEnd + 1 < len && charTypes[runEnd + 1] === runType) {
+       runEnd++;
+@@ -109,13 +109,13 @@ function findTargetInLine(
+ 
+     if (target === "start") {
+       if (data.charTypes[i] !== CharType.Space) {
+-        i = data.runEndByIndex[i]! + 1;
++        i = (data.runEndByIndex[i] ?? i) + 1;
+       }
+ 
+       if (i >= len) return len;
+ 
+       if (data.charTypes[i] === CharType.Space) {
+-        const next = data.nextNonSpaceAtOrAfter[i]!;
++        const next = data.nextNonSpaceAtOrAfter[i] ?? -1;
+         return next === -1 ? len : next;
+       }
+ 
+@@ -127,23 +127,23 @@ function findTargetInLine(
+     if (i >= len) return len;
+ 
+     if (data.charTypes[i] === CharType.Space) {
+-      const next = data.nextNonSpaceAtOrAfter[i]!;
++      const next = data.nextNonSpaceAtOrAfter[i] ?? -1;
+       if (next === -1) return len;
+       i = next;
+     }
+ 
+-    return data.runEndByIndex[i]!;
++    return data.runEndByIndex[i] ?? i;
+   }
+ 
+   if (i >= len) i = len - 1;
+   if (i > 0) i--;
+ 
+   if (data.charTypes[i] === CharType.Space) {
+-    const prev = data.prevNonSpaceAtOrBefore[i]!;
++    const prev = data.prevNonSpaceAtOrBefore[i] ?? -1;
+     if (prev !== -1) i = prev;
+   }
+ 
+-  return data.runStartByIndex[i]!;
++  return data.runStartByIndex[i] ?? i;
+ }
+ 
+ const DEFAULT_MAX_CACHE_ENTRIES = 256;
