@@ -1,3 +1,9 @@
+# TypeScript checks and formatting
+
+This repo uses `biome` for TypeScript linting/formatting and `tsgo` for TypeScript type checking.
+
+Run `./check.nu` after TypeScript changes. It runs Biome with unsafe fixes, then runs `tsgo` over the repo's TypeScript files.
+
 # Guidance
 
 - Use the `github` skill for GitHub operations.
