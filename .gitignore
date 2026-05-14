@@ -2,6 +2,7 @@
 agent/auth.json
 # session logs
 agent/sessions/
+agent/plans/
 
 # Common local-only files.
 .env
