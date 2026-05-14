@@ -1,8 +1,8 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { execFile } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const execFileAsync = promisify(execFile);
 
@@ -161,12 +161,15 @@ async function buildPrompt(cwd: string): Promise<string> {
     tryGit(cwd, ["remote", "-v"]),
   ]);
 
-  const mainRef =
-    (await tryGit(cwd, ["rev-parse", "--verify", "main"])) ? "main" :
-    (await tryGit(cwd, ["rev-parse", "--verify", "origin/main"])) ? "origin/main" :
-    (await tryGit(cwd, ["rev-parse", "--verify", "master"])) ? "master" :
-    (await tryGit(cwd, ["rev-parse", "--verify", "origin/master"])) ? "origin/master" :
-    null;
+  const mainRef = (await tryGit(cwd, ["rev-parse", "--verify", "main"]))
+    ? "main"
+    : (await tryGit(cwd, ["rev-parse", "--verify", "origin/main"]))
+      ? "origin/main"
+      : (await tryGit(cwd, ["rev-parse", "--verify", "master"]))
+        ? "master"
+        : (await tryGit(cwd, ["rev-parse", "--verify", "origin/master"]))
+          ? "origin/master"
+          : null;
 
   const [recentBranchLog, recentMainLog, mergeBase, diffStatMain] = await Promise.all([
     tryGit(cwd, ["log", "--oneline", "--decorate", "-12", "HEAD", "--"]),

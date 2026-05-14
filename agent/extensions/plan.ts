@@ -1,8 +1,8 @@
-import { getMarkdownTheme, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { Markdown } from "@earendil-works/pi-tui";
-import { mkdir, readFile, readdir, stat } from "node:fs/promises";
+import { mkdir, readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
+import { type ExtensionAPI, type ExtensionContext, getMarkdownTheme } from "@earendil-works/pi-coding-agent";
+import { Markdown } from "@earendil-works/pi-tui";
 
 const PLANS_ROOT = path.join(homedir(), ".pi", "agent", "plans");
 const MAX_PLAN_CHOICES = 20;
@@ -134,7 +134,7 @@ async function listPlanFiles(): Promise<PlanFile[]> {
   const plans: PlanFile[] = [];
   for (const dirname of dirs) {
     const dir = path.join(PLANS_ROOT, dirname);
-    let dirStat;
+    let dirStat: Awaited<ReturnType<typeof stat>>;
     try {
       dirStat = await stat(dir);
     } catch {
@@ -155,10 +155,13 @@ async function listPlanFiles(): Promise<PlanFile[]> {
       try {
         const fileStat = await stat(filePath);
         if (!fileStat.isFile()) continue;
-        plans.push({ path: filePath, dir, filename, mtimeMs: Math.max(fileStat.mtimeMs, dirStat.mtimeMs) });
-      } catch {
-        continue;
-      }
+        plans.push({
+          path: filePath,
+          dir,
+          filename,
+          mtimeMs: Math.max(fileStat.mtimeMs, dirStat.mtimeMs),
+        });
+      } catch {}
     }
   }
 
@@ -229,31 +232,39 @@ export default function planExtension(pi: ExtensionAPI) {
     parameters: {
       type: "object",
       properties: {
-        path: { type: "string", description: "The exact target plan file path that was written" },
-        summary: { type: "string", description: "One-sentence summary of the plan" },
+        path: {
+          type: "string",
+          description: "The exact target plan file path that was written",
+        },
+        summary: {
+          type: "string",
+          description: "One-sentence summary of the plan",
+        },
       },
       required: ["path"],
       additionalProperties: false,
     },
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const planDir = activePlan.dir ?? (activePlan.path ? path.dirname(normalizeForCompare(activePlan.path, ctx.cwd)) : undefined);
+      const planDir =
+        activePlan.dir ?? (activePlan.path ? path.dirname(normalizeForCompare(activePlan.path, ctx.cwd)) : undefined);
       if (!planDir) {
         throw new Error("No active plan directory is registered.");
       }
 
-      const actual = normalizeForCompare(params.path, ctx.cwd);
+      const requestedPath = String(params.path);
+      const actual = normalizeForCompare(requestedPath, ctx.cwd);
       if (!isPathDirectlyInDir(actual, planDir)) {
-        throw new Error(`finish_plan path must be inside ${planDir}; got ${params.path}`);
+        throw new Error(`finish_plan path must be inside ${planDir}; got ${requestedPath}`);
       }
       if (!isPlanFilename(actual)) {
-        throw new Error(`finish_plan path must end with -plan.md; got ${params.path}`);
+        throw new Error(`finish_plan path must end with -plan.md; got ${requestedPath}`);
       }
 
       try {
         const fileStat = await stat(actual);
         if (!fileStat.isFile()) throw new Error("not a file");
       } catch {
-        throw new Error(`Plan file does not exist yet: ${params.path}`);
+        throw new Error(`Plan file does not exist yet: ${requestedPath}`);
       }
 
       const planMarkdown = await readFile(actual, "utf8");
@@ -265,7 +276,11 @@ export default function planExtension(pi: ExtensionAPI) {
       const reviewMarkdown = `# Plan ready for review\n\nFile: \`${activePlan.path}\`\n\n---\n\n${planMarkdown}`;
       return {
         content: [{ type: "text", text: reviewMarkdown }],
-        details: { path: activePlan.path, summary: params.summary, markdown: reviewMarkdown },
+        details: {
+          path: activePlan.path,
+          summary: params.summary,
+          markdown: reviewMarkdown,
+        },
         terminate: true,
       };
     },
@@ -274,7 +289,9 @@ export default function planExtension(pi: ExtensionAPI) {
       if (details?.markdown) {
         return new Markdown(details.markdown, 0, 0, getMarkdownTheme());
       }
-      return new Markdown(String(result.content?.[0]?.text ?? "Plan saved."), 0, 0, getMarkdownTheme());
+      const firstContent = result.content?.[0];
+      const fallbackText = firstContent && "text" in firstContent ? firstContent.text : "Plan saved.";
+      return new Markdown(String(fallbackText), 0, 0, getMarkdownTheme());
     },
   });
 
@@ -383,14 +400,18 @@ export default function planExtension(pi: ExtensionAPI) {
   });
 
   pi.on("tool_call", async (event, ctx) => {
-    const planDir = activePlan.dir ?? (activePlan.path ? path.dirname(normalizeForCompare(activePlan.path, ctx.cwd)) : undefined);
+    const planDir =
+      activePlan.dir ?? (activePlan.path ? path.dirname(normalizeForCompare(activePlan.path, ctx.cwd)) : undefined);
     if (!planningInProgress || !planDir) return undefined;
 
     if (event.toolName === "write" || event.toolName === "edit") {
       const filePath = String(event.input.path ?? "");
       const actual = normalizeForCompare(filePath, ctx.cwd);
       if (!isPathDirectlyInDir(actual, planDir) || !isPlanFilename(actual)) {
-        return { block: true, reason: `Plan mode can only write a *-plan.md file inside ${planDir}` };
+        return {
+          block: true,
+          reason: `Plan mode can only write a *-plan.md file inside ${planDir}`,
+        };
       }
     }
 
@@ -400,7 +421,10 @@ export default function planExtension(pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
     const lastState = ctx.sessionManager
       .getEntries()
-      .filter((entry: { type: string; customType?: string }) => entry.type === "custom" && entry.customType === "plan-extension-state")
+      .filter(
+        (entry: { type: string; customType?: string }) =>
+          entry.type === "custom" && entry.customType === "plan-extension-state",
+      )
       .pop() as { data?: { activePlan?: PlanState } } | undefined;
 
     activePlan = lastState?.data?.activePlan ?? {};

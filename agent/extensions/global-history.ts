@@ -1,7 +1,7 @@
-import { CustomEditor, type EditorFactory, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { CustomEditor, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 const HISTORY_FILE = path.join(os.homedir(), ".pi", "agent", "prompt-history.json");
 const HISTORY_VERSION = 1;
@@ -9,6 +9,8 @@ const MAX_PERSISTED_ENTRIES = 1000;
 // The built-in editor currently caps in-memory up/down history at 100 entries.
 const MAX_SEEDED_EDITOR_ENTRIES = 100;
 const WRAPPED_FACTORY = Symbol("global-history-wrapped-editor-factory");
+
+type EditorFactory = NonNullable<ReturnType<ExtensionContext["ui"]["getEditorComponent"]>>;
 
 type HistoryFile = {
   version: number;
@@ -173,7 +175,10 @@ export default function (pi: ExtensionAPI) {
     description: "Clear the persistent global prompt history used by up-arrow navigation",
     handler: async (_args, ctx) => {
       clearHistory();
-      ctx.ui.notify("Global prompt history cleared. Current in-memory history resets on /reload or next session.", "success");
+      ctx.ui.notify(
+        "Global prompt history cleared. Current in-memory history resets on /reload or next session.",
+        "success" as "info",
+      );
     },
   });
 }

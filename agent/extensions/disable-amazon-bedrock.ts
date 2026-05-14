@@ -21,7 +21,9 @@ function disableBedrockAuth() {
 }
 
 function removeBedrockModels(ctx: ExtensionContext) {
-  const registry = ctx.modelRegistry as unknown as { models?: Array<{ provider?: string }> };
+  const registry = ctx.modelRegistry as unknown as {
+    models?: Array<{ provider?: string }>;
+  };
   if (Array.isArray(registry.models)) {
     registry.models = registry.models.filter((model) => model.provider !== BEDROCK_PROVIDER);
   }

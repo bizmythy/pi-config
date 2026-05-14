@@ -1,5 +1,5 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import * as path from "node:path";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 /**
  * Comprehensive security hook:
@@ -16,7 +16,10 @@ export default function (pi: ExtensionAPI) {
     { pattern: />\s*\/dev\/sd[a-z]/, desc: "raw device overwrite" },
     { pattern: /\bkill\s+-9\s+-1\b/, desc: "kill all processes" },
     { pattern: /:\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;/, desc: "fork bomb" },
-    { pattern: /\bgit\s+clean\s+[^;&|]*-[^;&|]*[df]/, desc: "destructive git clean" },
+    {
+      pattern: /\bgit\s+clean\s+[^;&|]*-[^;&|]*[df]/,
+      desc: "destructive git clean",
+    },
     { pattern: /\bgit\s+reset\s+--hard\b/, desc: "destructive git reset" },
     { pattern: /\bgit\s+push\b[^;&|]*\s(?:--force|-f)\b/, desc: "force push" },
   ];
@@ -27,7 +30,10 @@ export default function (pi: ExtensionAPI) {
     { pattern: /(^|\/)node_modules\//, desc: "node_modules" },
     { pattern: /^\.git\/|\/\.git\//, desc: "git directory" },
     { pattern: /\.pem$|\.key$/, desc: "private key file" },
-    { pattern: /(^|\/)id_rsa$|(^|\/)id_ed25519$|(^|\/)id_ecdsa$/, desc: "SSH key" },
+    {
+      pattern: /(^|\/)id_rsa$|(^|\/)id_ed25519$|(^|\/)id_ecdsa$/,
+      desc: "SSH key",
+    },
     { pattern: /(^|\/)\.ssh\//, desc: ".ssh directory" },
     { pattern: /(^|\/)secrets?\.(json|ya?ml|toml)$/i, desc: "secrets file" },
     { pattern: /(^|\/)credentials/i, desc: "credentials file" },
@@ -53,7 +59,10 @@ export default function (pi: ExtensionAPI) {
       for (const { pattern, desc } of dangerousCommands) {
         if (pattern.test(command)) {
           if (!ctx.hasUI) {
-            return { block: true, reason: `Blocked ${desc} (no UI to confirm)` };
+            return {
+              block: true,
+              reason: `Blocked ${desc} (no UI to confirm)`,
+            };
           }
 
           const ok = await ctx.ui.confirm(`Dangerous command: ${desc}`, command);
@@ -68,7 +77,10 @@ export default function (pi: ExtensionAPI) {
       for (const pattern of dangerousBashWrites) {
         if (pattern.test(command)) {
           if (ctx.hasUI) ctx.ui.notify("Blocked bash write to protected path", "warning");
-          return { block: true, reason: "Bash command writes to protected path" };
+          return {
+            block: true,
+            reason: "Bash command writes to protected path",
+          };
         }
       }
 
@@ -92,10 +104,7 @@ export default function (pi: ExtensionAPI) {
             return { block: true, reason: `Protected path (no UI): ${desc}` };
           }
 
-          const ok = await ctx.ui.confirm(
-            `Modifying ${desc}`,
-            `Are you sure you want to modify ${filePath}?`,
-          );
+          const ok = await ctx.ui.confirm(`Modifying ${desc}`, `Are you sure you want to modify ${filePath}?`);
 
           if (!ok) {
             return { block: true, reason: `User blocked write to ${desc}` };
