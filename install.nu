@@ -6,6 +6,7 @@
 # - installs the local npm workspace under ./npm
 # - applies patch-package patches from ./patches via npm postinstall
 # - updates/installs Pi-managed npm packages from agent/settings.json
+# - verifies that the Linear CLI is authenticated
 # - verifies that Pi can resolve the configured packages
 #
 # Usage:
@@ -16,6 +17,11 @@
 
 def command-exists [cmd: string] {
   not ((which $cmd) | is-empty)
+}
+
+def linear-authenticated [] {
+  let result = (do { ^linear auth whoami } | complete)
+  $result.exit_code == 0
 }
 
 def main [
@@ -37,7 +43,7 @@ def main [
     error make {msg: $"Missing npm workspace: ($npm_dir)"}
   }
 
-  let required_commands = ["pi-npm", "pi"]
+  let required_commands = ["pi-npm", "pi", "linear"]
   for cmd in $required_commands {
     if not (command-exists $cmd) {
       error make {msg: $"Missing required command `($cmd)`. Install/start Pi first so its commands are available."}
@@ -55,6 +61,26 @@ def main [
 
     print "==> Updating git checkout"
     do { cd $repo; ^git pull --ff-only --autostash }
+  }
+
+  if (linear-authenticated) {
+    print "==> Linear CLI is authenticated"
+  } else {
+    if not (command-exists "op") {
+      error make {msg: "Missing required command `op`; needed to fetch the Linear CLI credential from 1Password."}
+    }
+
+    print "==> Authenticating Linear CLI"
+    let linear_credential = (^op --account PLU4HO2JCJF23NNQK2ERWIYIZI read "op://Employee/linear-cli-access/credential" | str trim)
+    if ($linear_credential | is-empty) {
+      error make {msg: "1Password returned an empty Linear CLI credential."}
+    }
+
+    $linear_credential | ^linear auth login --plaintext
+
+    if not (linear-authenticated) {
+      error make {msg: "Linear CLI authentication failed."}
+    }
   }
 
   mkdir $cache_dir
