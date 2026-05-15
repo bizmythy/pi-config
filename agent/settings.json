@@ -6,12 +6,13 @@
   "npmCommand": [
     "pi-npm"
   ],
-  "defaultThinkingLevel": "low",
+  "defaultThinkingLevel": "medium",
   "packages": [
     "npm:pi-web-access",
     "npm:pi-ask-user",
     "../npm/node_modules/pi-vim",
-    "npm:pi-subagents"
+    "npm:pi-subagents",
+    "npm:@benvargas/pi-openai-fast"
   ],
   "theme": "catppuccin-mocha"
 }
