@@ -6,6 +6,7 @@ import { Text } from "@earendil-works/pi-tui";
 const REVIEW_SCRIPT_RELATIVE_PATH = "dev_tools/review/address_comments.py";
 const REPLY_TEMPLATES_RELATIVE_PATH =
   "generate/agentskills/manual_skills/address-review-comments/references/comment-reply-templates.md";
+const REPLACED_SKILL_NAME = "address-review-comments";
 const EXPECTED_REMOTE = "diracq/buildos-web";
 const CHECKPOINT_OPTIONS = ["resolve", "post", "edit", "feedback", "skip", "abort"] as const;
 
@@ -251,8 +252,39 @@ function setWorkflowStatus(ctx: ExtensionContext, active: boolean) {
   ctx.ui.setStatus("review-comments", active ? ctx.ui.theme.fg("warning", "review-comments") : undefined);
 }
 
+function stripReplacedSkillFromSystemPrompt(systemPrompt: string): string {
+  let next = systemPrompt.replace(
+    /\n? {2}<skill>\n {4}<name>address-review-comments<\/name>\n[\s\S]*? {2}<\/skill>\n?/g,
+    "\n",
+  );
+
+  next = next.replace(/<available_skills>\n\s*<\/available_skills>/g, "<available_skills>\n</available_skills>");
+  return next;
+}
+
 export default function addressReviewCommentsExtension(pi: ExtensionAPI) {
   let activeWorkflow: WorkflowState | undefined;
+
+  pi.on("input", async (event, ctx) => {
+    if (event.source === "extension") return { action: "continue" };
+
+    if (new RegExp(`^/skill:${REPLACED_SKILL_NAME}(\\s|$)`).test(event.text.trim())) {
+      ctx.ui.notify(
+        `The ${REPLACED_SKILL_NAME} skill is disabled in pi; use /address-review-comments instead.`,
+        "warning",
+      );
+      return { action: "handled" };
+    }
+
+    return { action: "continue" };
+  });
+
+  pi.on("before_agent_start", async (event) => {
+    const hasReplacedSkill = event.systemPromptOptions.skills?.some((skill) => skill.name === REPLACED_SKILL_NAME);
+    if (!hasReplacedSkill) return undefined;
+
+    return { systemPrompt: stripReplacedSkillFromSystemPrompt(event.systemPrompt) };
+  });
 
   pi.registerCommand("address-review-comments", {
     description: "Address PR review comments with structured human checkpoints",
