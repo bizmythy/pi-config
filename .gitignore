@@ -15,8 +15,5 @@ npm/*
 !npm/package-lock.json
 npm-cache/
 agent/git/
-agent/mcp-cache.json
-agent/mcp-onboarding.json
-agent/mcp-oauth/
 agent/prompt-history.json
 agent/prompt-history.json.*.tmp

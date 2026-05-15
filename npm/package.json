@@ -10,7 +10,6 @@
   },
   "dependencies": {
     "@vimee/core": "^0.3.0",
-    "pi-mcp-adapter": "^2.6.0",
     "pi-vim": "^0.3.2"
   },
   "scripts": {

@@ -92,7 +92,6 @@ def main [
 
   let required_local_packages = [
     ($npm_dir | path join "node_modules" "pi-vim"),
-    ($npm_dir | path join "node_modules" "pi-mcp-adapter"),
   ]
 
   for pkg in $required_local_packages {
