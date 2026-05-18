@@ -1,7 +1,7 @@
 import { access, readFile } from "node:fs/promises";
 import path from "node:path";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { Text } from "@earendil-works/pi-tui";
+import { type ExtensionAPI, type ExtensionContext, getMarkdownTheme } from "@earendil-works/pi-coding-agent";
+import { Markdown, Text } from "@earendil-works/pi-tui";
 
 const REVIEW_SCRIPT_RELATIVE_PATH = "dev_tools/review/address_comments.py";
 const REPLY_TEMPLATES_RELATIVE_PATH =
@@ -477,14 +477,25 @@ export default function addressReviewCommentsExtension(pi: ExtensionAPI) {
         details: { selectedOption, threadId: checkpoint.threadId, replyResponsePath },
       };
     },
-    renderCall(args, theme) {
+    renderCall(args) {
       const location = typeof args.location === "string" ? args.location : "unknown location";
-      const reviewer = typeof args.reviewer === "string" ? ` @${args.reviewer}` : "";
-      return new Text(
-        `${theme.fg("toolTitle", theme.bold("review checkpoint "))}${theme.fg("muted", location)}${reviewer}`,
-        0,
-        0,
-      );
+      const reviewer = typeof args.reviewer === "string" ? `@${args.reviewer}` : undefined;
+      const checkpointMarkdown =
+        typeof args.checkpointMarkdown === "string" ? args.checkpointMarkdown : "No checkpoint summary provided.";
+      const draftReply = typeof args.draftReply === "string" ? args.draftReply : "";
+      const recommendedAction =
+        args.recommendedAction === "resolve" || args.recommendedAction === "post" ? args.recommendedAction : undefined;
+
+      const metadata = [
+        `**Location:** \`${location}\``,
+        reviewer ? `**Reviewer:** ${reviewer}` : undefined,
+        recommendedAction ? `**Recommended action:** \`${recommendedAction}\`` : undefined,
+      ]
+        .filter((line): line is string => Boolean(line))
+        .join("\n");
+
+      const markdown = `## Review checkpoint\n\n${metadata}\n\n---\n\n${checkpointMarkdown}\n\n---\n\n### Draft reply\n\n${draftReply}`;
+      return new Markdown(markdown, 0, 0, getMarkdownTheme());
     },
     renderResult(result, _options, theme) {
       const details = result.details as
