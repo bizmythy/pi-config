@@ -145,7 +145,7 @@ async function detectOperation(cwd: string, gitDir: string): Promise<Operation> 
   };
 }
 
-async function buildPrompt(cwd: string): Promise<string> {
+async function buildPrompt(cwd: string, userRequest?: string): Promise<string> {
   const gitDir = await tryGit(cwd, ["rev-parse", "--absolute-git-dir"]);
   if (!gitDir) {
     throw new Error("/git-conflicts must be run from inside a git repository (no .git directory found).");
@@ -179,6 +179,7 @@ async function buildPrompt(cwd: string): Promise<string> {
   ]);
 
   const operation = await detectOperation(cwd, gitDir);
+  const userRequestSection = userRequest?.trim() ? `\n\nUser-provided request:\n${userRequest.trim()}` : "";
 
   return `View the git context for the current repository branch and main, then resolve all conflicts and proceed with the current operation until fully complete and all conflicts are resolved.
 
@@ -229,20 +230,20 @@ ${truncate(recentMainLog)}
 ## diff stat main...HEAD
 ${truncate(diffStatMain)}
 
-Start by inspecting the conflicted files and relevant commit context, then resolve and continue the operation until git reports it is fully complete.`;
+Start by inspecting the conflicted files and relevant commit context, then resolve and continue the operation until git reports it is fully complete.${userRequestSection}`;
 }
 
 export default function (pi: ExtensionAPI) {
   pi.registerCommand("git-conflicts", {
     description: "Resolve git conflicts and continue the active merge/rebase/cherry-pick operation",
-    handler: async (_args, ctx) => {
+    handler: async (args, ctx) => {
       if (!ctx.isIdle()) {
         ctx.ui.notify("Agent is busy. Run /git-conflicts again when it is idle.", "warning");
         return;
       }
 
       try {
-        const prompt = await buildPrompt(ctx.cwd);
+        const prompt = await buildPrompt(ctx.cwd, args);
         ctx.ui.notify("Starting git conflict resolution workflow", "info");
         pi.sendUserMessage(prompt);
       } catch (error) {
