@@ -1,6 +1,126 @@
 import * as path from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
+type ShellToken = { type: "word" | "control"; value: string };
+
+function tokenizeShell(command: string): ShellToken[] {
+  const tokens: ShellToken[] = [];
+  let current = "";
+  let quote: "'" | '"' | undefined;
+  let escaped = false;
+
+  const flushWord = () => {
+    if (current.length > 0) {
+      tokens.push({ type: "word", value: current });
+      current = "";
+    }
+  };
+
+  for (const char of command) {
+    if (escaped) {
+      current += char;
+      escaped = false;
+      continue;
+    }
+
+    if (char === "\\") {
+      escaped = true;
+      continue;
+    }
+
+    if (quote) {
+      if (char === quote) {
+        quote = undefined;
+      } else {
+        current += char;
+      }
+      continue;
+    }
+
+    if (char === "'" || char === '"') {
+      quote = char;
+      continue;
+    }
+
+    if (/\s/.test(char)) {
+      flushWord();
+      if (char === "\n") tokens.push({ type: "control", value: char });
+      continue;
+    }
+
+    if (";&|()<>".includes(char)) {
+      flushWord();
+      tokens.push({ type: "control", value: char });
+      continue;
+    }
+
+    current += char;
+  }
+
+  if (escaped) current += "\\";
+  flushWord();
+
+  return tokens;
+}
+
+function isRmCommand(word: string): boolean {
+  return word === "rm" || word.endsWith("/rm");
+}
+
+function isRecursiveRmFlag(arg: string): boolean {
+  return arg === "--recursive" || (/^-[^-]/.test(arg) && /[rR]/.test(arg));
+}
+
+function getRecursiveRmTargets(command: string): string[][] {
+  const tokens = tokenizeShell(command);
+  const rmTargets: string[][] = [];
+
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i];
+    if (token.type !== "word" || !isRmCommand(token.value)) continue;
+
+    const args: string[] = [];
+    for (let j = i + 1; j < tokens.length && tokens[j]?.type === "word"; j++) {
+      args.push(tokens[j].value);
+    }
+
+    if (!args.some(isRecursiveRmFlag)) continue;
+
+    let afterOptions = false;
+    const targets: string[] = [];
+    for (const arg of args) {
+      if (!afterOptions && arg === "--") {
+        afterOptions = true;
+        continue;
+      }
+
+      if (!afterOptions && arg.startsWith("-")) continue;
+      targets.push(arg);
+    }
+
+    rmTargets.push(targets);
+  }
+
+  return rmTargets;
+}
+
+function isLiteralPathBelowTmp(target: string, cwd: string): boolean {
+  if (target.length === 0) return false;
+
+  // Shell expansions can resolve to paths outside /tmp, so keep them guarded.
+  if (/[`$]/.test(target) || target.startsWith("~")) return false;
+
+  const absoluteTarget = path.isAbsolute(target) ? path.normalize(target) : path.resolve(cwd, target);
+  return absoluteTarget !== "/tmp" && absoluteTarget !== "/tmp/" && absoluteTarget.startsWith("/tmp/");
+}
+
+function hasUnsafeRecursiveRm(command: string, cwd: string): boolean {
+  return getRecursiveRmTargets(command).some((targets) => {
+    if (targets.length === 0) return true;
+    return !targets.every((target) => isLiteralPathBelowTmp(target, cwd));
+  });
+}
+
 /**
  * Comprehensive security hook:
  * - Blocks dangerous bash commands (rm -rf, sudo, chmod 777, etc.)
@@ -8,7 +128,6 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
  */
 export default function (pi: ExtensionAPI) {
   const dangerousCommands = [
-    { pattern: /\brm\s+(-[^\s]*r|--recursive)/, desc: "recursive delete" },
     { pattern: /\bsudo\b/, desc: "sudo command" },
     { pattern: /\b(chmod|chown)\b.*777/, desc: "dangerous permissions" },
     { pattern: /\bmkfs\b/, desc: "filesystem format" },
@@ -55,6 +174,21 @@ export default function (pi: ExtensionAPI) {
   pi.on("tool_call", async (event, ctx) => {
     if (event.toolName === "bash") {
       const command = event.input.command as string;
+
+      if (hasUnsafeRecursiveRm(command, ctx.cwd)) {
+        if (!ctx.hasUI) {
+          return {
+            block: true,
+            reason: "Blocked recursive delete (no UI to confirm)",
+          };
+        }
+
+        const ok = await ctx.ui.confirm("Dangerous command: recursive delete", command);
+
+        if (!ok) {
+          return { block: true, reason: "Blocked recursive delete by user" };
+        }
+      }
 
       for (const { pattern, desc } of dangerousCommands) {
         if (pattern.test(command)) {
