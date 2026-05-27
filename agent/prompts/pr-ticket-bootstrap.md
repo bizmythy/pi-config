@@ -1,11 +1,13 @@
 ---
-name: pr-ticket-bootstrap
-description: "Ensure the current git branch has a linked Linear ticket and GitHub PR. Use when the user wants to bootstrap, prepare, or clean up branch metadata for review, including checking whether the branch already has a PR, extracting or creating a BWEB-123 ticket, creating a draft PR, filling the repository PR template, and optionally marking the PR ready for review."
+description: "Ensure the current git branch has a linked Linear ticket and GitHub PR."
+argument-hint: "[ready for review]"
 ---
 
 # PR Ticket Bootstrap
 
 Ensure the current branch has the expected GitHub and Linear bookkeeping before review.
+
+Additional user details: $ARGUMENTS
 
 ## Workflow
 
