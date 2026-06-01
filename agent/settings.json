@@ -1,17 +1,18 @@
 {
-  "lastChangelogVersion": "0.75.3",
+  "lastChangelogVersion": "0.78.0",
   "defaultProvider": "openai-codex",
   "defaultModel": "gpt-5.5",
   "extensions": [],
   "npmCommand": [
     "pi-npm"
   ],
-  "defaultThinkingLevel": "medium",
+  "defaultThinkingLevel": "high",
   "packages": [
     "npm:pi-web-access",
     "npm:pi-ask-user",
     "../npm/node_modules/pi-vim",
     "npm:pi-subagents"
   ],
-  "theme": "catppuccin-mocha"
+  "theme": "catppuccin-mocha",
+  "hideThinkingBlock": true
 }
