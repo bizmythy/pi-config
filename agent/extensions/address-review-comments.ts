@@ -33,6 +33,7 @@ interface CheckpointParams {
 interface WorkflowState {
   repoRoot: string;
   fetchResponsePath: string;
+  startCommitShort: string;
   prNumber?: number;
   startedAt: string;
   active?: boolean;
@@ -154,6 +155,13 @@ async function resolveRepo(pi: ExtensionAPI, ctx: ExtensionContext): Promise<Rep
   return { repoRoot, remoteSlug };
 }
 
+async function getShortHead(pi: ExtensionAPI, repoRoot: string): Promise<string> {
+  const result = await pi.exec("git", ["rev-parse", "--short", "HEAD"], { cwd: repoRoot, timeout: 5_000 });
+  if (result.code !== 0)
+    throw new Error(`Unable to determine current commit.\n${result.stderr || result.stdout}`.trim());
+  return result.stdout.trim();
+}
+
 async function runFetch(pi: ExtensionAPI, repoRoot: string, prNumber?: number): Promise<string> {
   const args = ["run", REVIEW_SCRIPT_RELATIVE_PATH, "fetch"];
   if (prNumber !== undefined) args.push(String(prNumber));
@@ -215,6 +223,7 @@ You are addressing PR review comments in manual interactive mode. The review con
 
 Repository root: \`${state.repoRoot}\`
 Fetch response JSON file: \`${state.fetchResponsePath}\`
+Starting commit: \`${state.startCommitShort}\` (compare against this to track overall review changes)
 Reply templates: \`${replyTemplatesPath}\`
 
 ${summary}
@@ -233,7 +242,8 @@ ${summary}
 - When it returns \`feedback\`, address the user's feedback in the code and/or draft reply, then recreate the checkpoint for the same thread.
 - When it returns \`skip\`, revert all code changes you made for that comment, post no reply, track it as skipped, and continue.
 - When it returns \`abort\`, stop processing remaining comments and summarize the current state.
-- Leave changes unstaged. Never commit. Never add AI attribution or co-authorship.
+- Leave your own changes unstaged. Never commit. The user may commit changes while you work, so HEAD may advance or status may be clean at the end.
+- Never add AI attribution or co-authorship.
 
 ## Suggested workflow
 
@@ -305,6 +315,7 @@ export default function addressReviewCommentsExtension(pi: ExtensionAPI) {
 
       try {
         const { repoRoot } = await resolveRepo(pi, ctx);
+        const startCommitShort = await getShortHead(pi, repoRoot);
         ctx.ui.notify("Fetching review comments...", "info");
         const fetchResponsePath = await runFetch(pi, repoRoot, parsed.prNumber);
         const payload = await loadFetchPayload(fetchResponsePath);
@@ -318,6 +329,7 @@ export default function addressReviewCommentsExtension(pi: ExtensionAPI) {
         activeWorkflow = {
           repoRoot,
           fetchResponsePath,
+          startCommitShort,
           prNumber: parsed.prNumber ?? payload.pull_request?.number,
           startedAt: new Date().toISOString(),
           active: true,
