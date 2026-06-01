@@ -1,7 +1,21 @@
 import { access, readFile } from "node:fs/promises";
 import path from "node:path";
-import { type ExtensionAPI, type ExtensionContext, getMarkdownTheme } from "@earendil-works/pi-coding-agent";
-import { Markdown, Text } from "@earendil-works/pi-tui";
+import {
+  type ExtensionAPI,
+  type ExtensionContext,
+  getMarkdownTheme,
+  type Theme,
+} from "@earendil-works/pi-coding-agent";
+import {
+  type Component,
+  Key,
+  Markdown,
+  matchesKey,
+  Text,
+  type TUI,
+  truncateToWidth,
+  visibleWidth,
+} from "@earendil-works/pi-tui";
 
 const REVIEW_SCRIPT_RELATIVE_PATH = "dev_tools/review/address_comments.py";
 const REPLY_TEMPLATES_RELATIVE_PATH =
@@ -215,6 +229,155 @@ async function runReply(
   return responsePath;
 }
 
+function makeCheckpointMarkdown(checkpoint: CheckpointParams): string {
+  const reviewer = checkpoint.reviewer ? `\n**Reviewer:** @${checkpoint.reviewer}` : "";
+  const recommended = checkpoint.recommendedAction
+    ? `\n**Recommended action:** \`${checkpoint.recommendedAction}\``
+    : "";
+  return `# Review checkpoint\n\n**Location:** \`${checkpoint.location}\`${reviewer}${recommended}\n\n---\n\n${checkpoint.checkpointMarkdown}\n\n---\n\n## Draft reply\n\n${checkpoint.draftReply}`;
+}
+
+function padToWidth(line: string, width: number): string {
+  const truncated = truncateToWidth(line, width, "");
+  return truncated + " ".repeat(Math.max(0, width - visibleWidth(truncated)));
+}
+
+class ReviewCheckpointDialog implements Component {
+  private readonly markdown: Markdown;
+  private scrollOffset = 0;
+  private selectedIndex: number;
+
+  constructor(
+    private readonly tui: TUI,
+    private readonly theme: Theme,
+    checkpoint: CheckpointParams,
+    private readonly done: (result: CheckpointOption | undefined) => void,
+  ) {
+    this.markdown = new Markdown(makeCheckpointMarkdown(checkpoint), 1, 0, getMarkdownTheme(), {
+      bgColor: (text) => theme.bg("customMessageBg", text),
+    });
+    this.selectedIndex = Math.max(0, CHECKPOINT_OPTIONS.indexOf(checkpoint.recommendedAction ?? "resolve"));
+  }
+
+  render(width: number): string[] {
+    const availableHeight = Math.max(1, this.tui.terminal.rows - 2);
+    const height = Math.min(availableHeight, Math.max(12, Math.floor(this.tui.terminal.rows * 0.9)));
+    const bodyWidth = Math.max(1, width - 2);
+    const bodyLines = this.markdown.render(bodyWidth);
+    const fixedLineCount = 7;
+    const viewportHeight = Math.max(1, height - fixedLineCount);
+    const maxScrollOffset = Math.max(0, bodyLines.length - viewportHeight);
+    this.scrollOffset = Math.max(0, Math.min(this.scrollOffset, maxScrollOffset));
+
+    const visibleBody = bodyLines.slice(this.scrollOffset, this.scrollOffset + viewportHeight);
+    while (visibleBody.length < viewportHeight)
+      visibleBody.push(this.theme.bg("customMessageBg", " ".repeat(bodyWidth)));
+
+    const lines = [
+      this.border("╭", "╮", width),
+      this.frame(this.theme.fg("accent", this.theme.bold("Review checkpoint")), width),
+      this.frame(this.scrollText(bodyLines.length, viewportHeight), width),
+      ...visibleBody.map((line) => this.frame(line, width)),
+      this.frame(this.actionText(), width),
+      this.frame(this.theme.fg("dim", CHECKPOINT_OPTION_LABELS[CHECKPOINT_OPTIONS[this.selectedIndex]]), width),
+      this.frame(
+        this.theme.fg("dim", "↑↓/PgUp/PgDn scroll • ←→ choose • 1-6 shortcut • Enter select • Esc abort"),
+        width,
+      ),
+      this.border("╰", "╯", width),
+    ];
+
+    return lines.slice(0, height);
+  }
+
+  handleInput(data: string): void {
+    const page = Math.max(3, Math.floor(this.tui.terminal.rows * 0.5));
+
+    if (matchesKey(data, Key.escape)) {
+      this.done(undefined);
+      return;
+    }
+    if (matchesKey(data, Key.enter)) {
+      this.done(CHECKPOINT_OPTIONS[this.selectedIndex]);
+      return;
+    }
+    if (/^[1-6]$/.test(data)) {
+      this.done(CHECKPOINT_OPTIONS[Number(data) - 1]);
+      return;
+    }
+    if (matchesKey(data, Key.left)) {
+      this.selectedIndex = (this.selectedIndex + CHECKPOINT_OPTIONS.length - 1) % CHECKPOINT_OPTIONS.length;
+      this.tui.requestRender();
+      return;
+    }
+    if (matchesKey(data, Key.right) || matchesKey(data, Key.tab)) {
+      this.selectedIndex = (this.selectedIndex + 1) % CHECKPOINT_OPTIONS.length;
+      this.tui.requestRender();
+      return;
+    }
+    if (matchesKey(data, Key.up)) {
+      this.scrollOffset = Math.max(0, this.scrollOffset - 1);
+      this.tui.requestRender();
+      return;
+    }
+    if (matchesKey(data, Key.down)) {
+      this.scrollOffset += 1;
+      this.tui.requestRender();
+      return;
+    }
+    if (matchesKey(data, Key.pageUp)) {
+      this.scrollOffset = Math.max(0, this.scrollOffset - page);
+      this.tui.requestRender();
+      return;
+    }
+    if (matchesKey(data, Key.pageDown)) {
+      this.scrollOffset += page;
+      this.tui.requestRender();
+      return;
+    }
+    if (matchesKey(data, Key.home)) {
+      this.scrollOffset = 0;
+      this.tui.requestRender();
+      return;
+    }
+    if (matchesKey(data, Key.end)) {
+      this.scrollOffset = Number.MAX_SAFE_INTEGER;
+      this.tui.requestRender();
+    }
+  }
+
+  invalidate(): void {
+    this.markdown.invalidate();
+  }
+
+  private border(left: string, right: string, width: number): string {
+    return this.theme.fg("borderAccent", left + "─".repeat(Math.max(0, width - 2)) + right);
+  }
+
+  private frame(content: string, width: number): string {
+    const innerWidth = Math.max(0, width - 2);
+    const inner = padToWidth(content, innerWidth);
+    return this.theme.fg("borderAccent", "│") + inner + this.theme.fg("borderAccent", "│");
+  }
+
+  private scrollText(totalLines: number, viewportHeight: number): string {
+    const first = Math.min(totalLines, this.scrollOffset + 1);
+    const last = Math.min(totalLines, this.scrollOffset + viewportHeight);
+    const moreAbove = this.scrollOffset > 0 ? `↑ ${this.scrollOffset} above` : "top";
+    const moreBelow = last < totalLines ? `↓ ${totalLines - last} below` : "bottom";
+    return this.theme.fg("dim", `Showing ${first}-${last} of ${totalLines} lines (${moreAbove}, ${moreBelow})`);
+  }
+
+  private actionText(): string {
+    return CHECKPOINT_OPTIONS.map((option, index) => {
+      const label = ` ${index + 1}:${option} `;
+      return index === this.selectedIndex
+        ? this.theme.bg("selectedBg", this.theme.fg("accent", label))
+        : this.theme.fg("muted", label);
+    }).join(" ");
+  }
+}
+
 function makeAgentPrompt(state: WorkflowState, summary: string): string {
   const replyTemplatesPath = path.join(state.repoRoot, REPLY_TEMPLATES_RELATIVE_PATH);
   return `# Address PR Review Comments
@@ -399,18 +562,15 @@ export default function addressReviewCommentsExtension(pi: ExtensionAPI) {
       }
 
       const checkpoint = params as CheckpointParams;
-      const titleParts = [checkpoint.location];
-      if (checkpoint.reviewer) titleParts.push(`@${checkpoint.reviewer}`);
-      const title = `Review checkpoint: ${titleParts.join(" - ")}`;
-      const recommended = checkpoint.recommendedAction ? `\nRecommended action: ${checkpoint.recommendedAction}` : "";
-      const body = `${checkpoint.checkpointMarkdown}\n\n---\n\nDraft reply:\n\n${checkpoint.draftReply}${recommended}`;
+      const selectedOption = await ctx.ui.custom<CheckpointOption | undefined>(
+        (tui, theme, _keybindings, done) => new ReviewCheckpointDialog(tui, theme, checkpoint, done),
+        {
+          overlay: true,
+          overlayOptions: { anchor: "center", width: "90%", maxHeight: "90%", margin: 1 },
+        },
+      );
 
-      const selected = (await ctx.ui.select(
-        `${title}\n\n${body}`,
-        CHECKPOINT_OPTIONS.map((option) => CHECKPOINT_OPTION_LABELS[option]),
-      )) as string | undefined;
-
-      if (!selected) {
+      if (!selectedOption) {
         const finishedWorkflow = { ...activeWorkflow, active: false, finishedAt: new Date().toISOString() };
         activeWorkflow = undefined;
         pi.appendEntry("address-review-comments-state", finishedWorkflow);
@@ -425,8 +585,6 @@ export default function addressReviewCommentsExtension(pi: ExtensionAPI) {
           details: { selectedOption: "abort", threadId: checkpoint.threadId },
         };
       }
-
-      const selectedOption = selected.split(" ", 1)[0] as CheckpointOption;
 
       if (selectedOption === "edit" || selectedOption === "feedback") {
         const prompt =
