@@ -224,6 +224,8 @@ ${summary}
 - Treat the fetch response JSON file as the source of truth. Inspect it with \`jq\`, \`read\`, or other read-only tools as needed. The JSON payload itself is intentionally not pasted here.
 - Summarize the unresolved review threads, then proceed immediately. Do not ask the user whether to proceed.
 - Process review threads one at a time. Continue until every thread is resolved, posted, skipped, flagged, or the user selects abort.
+- Never attempt to fix different issues at once, fix one issue at a time and present a checkpoint before continuing.
+  - If multiple comments are regarding the same issue/fix, you may group those.
 - Never run the hidden review-comment fetch/reply operations yourself and never use manual GitHub reply/resolve commands.
 - To ask for human approval or submit any reply, call \`address_review_checkpoint\`. This includes outdated-thread replies.
 - The human is the only approval gate. A reply is submitted only when \`address_review_checkpoint\` returns \`resolve\` or \`post\` with a response file path.
@@ -245,7 +247,7 @@ ${summary}
    - Make the appropriate code change when needed.
    - Draft a concise reply using the reply templates.
    - Call \`address_review_checkpoint\` with the thread id, location, checkpoint summary/diff, and exact draft reply.
-4. After all threads are processed, summarize addressed/skipped/flagged items and remind the user that changes are unstaged.`;
+4. After all threads are processed, summarize addressed/skipped/flagged items.`;
 }
 
 function setWorkflowStatus(ctx: ExtensionContext, active: boolean) {
