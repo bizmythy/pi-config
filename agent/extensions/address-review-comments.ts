@@ -1,9 +1,12 @@
 import { access, readFile } from "node:fs/promises";
 import path from "node:path";
 import {
+  type BeforeAgentStartEvent,
   type ExtensionAPI,
   type ExtensionContext,
+  formatSkillsForPrompt,
   getMarkdownTheme,
+  type Skill,
   type Theme,
 } from "@earendil-works/pi-coding-agent";
 import {
@@ -21,6 +24,7 @@ const REVIEW_SCRIPT_RELATIVE_PATH = "dev_tools/review/address_comments.py";
 const REPLY_TEMPLATES_RELATIVE_PATH =
   "generate/agentskills/manual_skills/address-review-comments/references/comment-reply-templates.md";
 const REPLACED_SKILL_NAME = "address-review-comments";
+const REPLACED_SKILL_FILE = `${REPLACED_SKILL_NAME}/SKILL.md`;
 const EXPECTED_REMOTE = "diracq/buildos-web";
 const CHECKPOINT_OPTIONS = ["resolve", "post", "edit", "feedback", "skip", "abort"] as const;
 
@@ -427,23 +431,72 @@ function setWorkflowStatus(ctx: ExtensionContext, active: boolean) {
   ctx.ui.setStatus("review-comments", active ? ctx.ui.theme.fg("warning", "review-comments") : undefined);
 }
 
-function stripReplacedSkillFromSystemPrompt(systemPrompt: string): string {
+function isReplacedSkillName(name: unknown): boolean {
+  return typeof name === "string" && name === REPLACED_SKILL_NAME;
+}
+
+function isReplacedSkillPath(filePath: unknown): boolean {
+  if (typeof filePath !== "string") return false;
+
+  const normalized = filePath
+    .trim()
+    .replace(/^[`'"]+|[`'";,]+$/g, "")
+    .split(/[\\/]/)
+    .join("/");
+  return normalized === REPLACED_SKILL_FILE || normalized.endsWith(`/${REPLACED_SKILL_FILE}`);
+}
+
+function isReplacedSkillInvocation(text: string): boolean {
+  return new RegExp(`^/skill:${REPLACED_SKILL_NAME}(\\s|$)`).test(text.trim());
+}
+
+function filterReplacedSkills(skills: Skill[] | undefined): Skill[] | undefined {
+  if (!skills?.some((skill) => isReplacedSkillName(skill.name))) return skills;
+  return skills.filter((skill) => !isReplacedSkillName(skill.name));
+}
+
+function stripReplacedSkillFromSystemPrompt(systemPrompt: string, filteredSkills?: Skill[]): string {
+  const formattedSkills = filteredSkills ? formatSkillsForPrompt(filteredSkills) : undefined;
+  const fullSkillsSection =
+    /\n\nThe following skills provide specialized instructions for specific tasks\.\nUse the read tool to load a skill's file when the task matches its description\.\nWhen a skill file references a relative path, resolve it against the skill directory \(parent of SKILL\.md \/ dirname of the path\) and use that absolute path in tool commands\.\n\n<available_skills>\n[\s\S]*?<\/available_skills>/;
+
+  if (formattedSkills !== undefined && fullSkillsSection.test(systemPrompt)) {
+    return systemPrompt.replace(fullSkillsSection, formattedSkills);
+  }
+
   let next = systemPrompt.replace(
-    /\n? {2}<skill>\n {4}<name>address-review-comments<\/name>\n[\s\S]*? {2}<\/skill>\n?/g,
+    new RegExp(`\\n? {2}<skill>\\n {4}<name>${REPLACED_SKILL_NAME}<\\/name>\\n[\\s\\S]*? {2}<\\/skill>\\n?`, "g"),
     "\n",
   );
 
+  next = next.replace(
+    /\n\nThe following skills provide specialized instructions for specific tasks\.\nUse the read tool to load a skill's file when the task matches its description\.\nWhen a skill file references a relative path, resolve it against the skill directory \(parent of SKILL\.md \/ dirname of the path\) and use that absolute path in tool commands\.\n\n<available_skills>\n\s*<\/available_skills>/g,
+    "",
+  );
   next = next.replace(/<available_skills>\n\s*<\/available_skills>/g, "<available_skills>\n</available_skills>");
   return next;
+}
+
+function removeReplacedSkillFromAgentStart(event: BeforeAgentStartEvent): string | undefined {
+  const originalSkills = event.systemPromptOptions.skills;
+  const filteredSkills = filterReplacedSkills(originalSkills);
+  const skillsChanged = filteredSkills !== originalSkills;
+  if (skillsChanged) {
+    event.systemPromptOptions.skills = filteredSkills;
+  }
+
+  const nextSystemPrompt = stripReplacedSkillFromSystemPrompt(
+    event.systemPrompt,
+    skillsChanged ? filteredSkills : undefined,
+  );
+  return nextSystemPrompt === event.systemPrompt ? undefined : nextSystemPrompt;
 }
 
 export default function addressReviewCommentsExtension(pi: ExtensionAPI) {
   let activeWorkflow: WorkflowState | undefined;
 
   pi.on("input", async (event, ctx) => {
-    if (event.source === "extension") return { action: "continue" };
-
-    if (new RegExp(`^/skill:${REPLACED_SKILL_NAME}(\\s|$)`).test(event.text.trim())) {
+    if (isReplacedSkillInvocation(event.text)) {
       ctx.ui.notify(
         `The ${REPLACED_SKILL_NAME} skill is disabled in pi; use /address-review-comments instead.`,
         "warning",
@@ -455,10 +508,10 @@ export default function addressReviewCommentsExtension(pi: ExtensionAPI) {
   });
 
   pi.on("before_agent_start", async (event) => {
-    const hasReplacedSkill = event.systemPromptOptions.skills?.some((skill) => skill.name === REPLACED_SKILL_NAME);
-    if (!hasReplacedSkill) return undefined;
+    const systemPrompt = removeReplacedSkillFromAgentStart(event);
+    if (!systemPrompt) return undefined;
 
-    return { systemPrompt: stripReplacedSkillFromSystemPrompt(event.systemPrompt) };
+    return { systemPrompt };
   });
 
   pi.registerCommand("address-review-comments", {
@@ -686,9 +739,25 @@ export default function addressReviewCommentsExtension(pi: ExtensionAPI) {
   });
 
   pi.on("tool_call", async (event) => {
-    if (!activeWorkflow || event.toolName !== "bash") return undefined;
+    if (event.toolName === "read" && isReplacedSkillPath(event.input.path)) {
+      return {
+        block: true,
+        reason: `The ${REPLACED_SKILL_NAME} skill is disabled in pi; use /address-review-comments instead.`,
+      };
+    }
+
+    if (event.toolName !== "bash") return undefined;
 
     const command = String(event.input.command ?? "");
+    if (command.split(/\s+/).some(isReplacedSkillPath)) {
+      return {
+        block: true,
+        reason: `The ${REPLACED_SKILL_NAME} skill is disabled in pi; use /address-review-comments instead.`,
+      };
+    }
+
+    if (!activeWorkflow) return undefined;
+
     const isReviewOperation = command.includes(REVIEW_SCRIPT_RELATIVE_PATH) && /\b(fetch|reply)\b/.test(command);
     const isManualGitHubReviewMutation =
       /\bgh\s+api\b/.test(command) &&
