@@ -1,0 +1,8 @@
+{
+  "name": "pi-agent-local-extensions",
+  "private": true,
+  "dependencies": {
+    "qrcode": "^1.5.4",
+    "ws": "^8.21.0"
+  }
+}

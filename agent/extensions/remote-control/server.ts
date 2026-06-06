@@ -31,8 +31,8 @@ interface WsServer {
   close(cb?: () => void): void;
 }
 
-// Load ws (bundled with pi) without needing @types/ws installed locally
-const _require = createRequire(import.meta.url);
+// Load ws from the agent npm workspace without needing @types/ws installed locally.
+const _require = createRequire(new URL("../../package.json", import.meta.url));
 const wsModule = _require("ws") as {
   WebSocketServer: new (opts: { noServer: boolean }) => WsServer;
   OPEN: number;

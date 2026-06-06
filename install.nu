@@ -31,6 +31,7 @@ def main [
 ] {
   let repo = ($env.FILE_PWD? | default $env.PWD)
   let npm_dir = ($repo | path join "npm")
+  let agent_dir = ($repo | path join "agent")
   let cache_dir = ($repo | path join "npm-cache")
 
   print $"==> Pi config repo: ($repo)"
@@ -41,6 +42,10 @@ def main [
 
   if not ($npm_dir | path exists) {
     error make {msg: $"Missing npm workspace: ($npm_dir)"}
+  }
+
+  if not (($agent_dir | path join "package.json") | path exists) {
+    error make {msg: $"Missing agent npm package manifest: ($agent_dir | path join 'package.json')"}
   }
 
   let required_commands = ["pi-npm", "pi", "linear"]
@@ -90,8 +95,15 @@ def main [
     do { cd $npm_dir; ^pi-npm install --include=dev }
   }
 
+  print "==> Installing agent extension npm workspace"
+  with-env {npm_config_cache: $cache_dir} {
+    ^pi-npm --prefix $agent_dir install
+  }
+
   let required_local_packages = [
     ($npm_dir | path join "node_modules" "pi-vim"),
+    ($agent_dir | path join "node_modules" "qrcode"),
+    ($agent_dir | path join "node_modules" "ws"),
   ]
 
   for pkg in $required_local_packages {

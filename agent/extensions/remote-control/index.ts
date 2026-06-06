@@ -20,7 +20,7 @@ import { type RemoteServer, startServer } from "./server.js";
 
 // ── Extension entry point ────────────────────────────────────────────────────
 
-const _require = createRequire(import.meta.url);
+const _require = createRequire(new URL("../../package.json", import.meta.url));
 const QRCode = _require("qrcode") as {
   toString: (text: string, opts: Record<string, unknown>) => Promise<string>;
 };
