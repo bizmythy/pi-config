@@ -397,7 +397,7 @@ ${summary}
 
 ## Critical rules
 
-- Treat the fetch response JSON file as the source of truth. Inspect it with \`jq\`, \`read\`, or other read-only tools as needed. The JSON payload itself is intentionally not pasted here.
+- Treat the fetch response JSON file as the source of truth. Inspect it with \`read\` or other read-only tools as needed. The JSON payload itself is intentionally not pasted here.
 - Summarize the unresolved review threads, then proceed immediately. Do not ask the user whether to proceed.
 - Process review threads one at a time. Continue until every thread is resolved, posted, skipped, flagged, or the user selects abort.
 - Never attempt to fix different issues at once, fix one issue at a time and present a checkpoint before continuing.
@@ -414,7 +414,7 @@ ${summary}
 
 ## Suggested workflow
 
-1. Inspect the fetch response JSON and authored diff path. Use \`jq\` to list thread ids, locations, authors, comments, outdated status, and diff hunks.
+1. Inspect the fetch response JSON and authored diff path to list thread ids, locations, authors, comments, outdated status, and diff hunks.
 2. Present a concise summary of the review threads.
 3. For each thread:
    - Show reviewer, location, diff hunk, and full conversation.
