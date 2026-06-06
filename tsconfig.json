@@ -11,8 +11,12 @@
     "typeRoots": ["./npm/node_modules/@types"],
     "types": ["node"],
     "paths": {
-      "@earendil-works/pi-coding-agent": ["./npm/node_modules/@earendil-works/pi-coding-agent/dist/index.d.ts"],
-      "@earendil-works/pi-tui": ["./npm/node_modules/@earendil-works/pi-tui/dist/index.d.ts"]
+      "@earendil-works/pi-coding-agent": [
+        "/run/current-system/sw/lib/node_modules/@earendil-works/pi-coding-agent/dist/index.d.ts"
+      ],
+      "@earendil-works/pi-tui": [
+        "/run/current-system/sw/lib/node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-tui/dist/index.d.ts"
+      ]
     }
   },
   "include": ["**/*.ts"],
