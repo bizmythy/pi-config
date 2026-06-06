@@ -10,7 +10,9 @@
   },
   "dependencies": {
     "@vimee/core": "^0.3.0",
-    "pi-vim": "^0.3.2"
+    "pi-vim": "^0.3.2",
+    "qrcode": "^1.5.4",
+    "ws": "^8.21.0"
   },
   "scripts": {
     "postinstall": "patch-package --patch-dir ../patches"
