@@ -229,7 +229,7 @@ export function startServer(pi: ExtensionAPI, ctx: ExtensionContext): Promise<Re
   });
 
   return new Promise((resolve) => {
-    httpServer.listen(0, "127.0.0.1", () => {
+    httpServer.listen(0, "0.0.0.0", () => {
       resolve({
         broadcast,
         sync,
