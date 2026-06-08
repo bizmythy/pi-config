@@ -11,7 +11,11 @@
     "npm:pi-web-access",
     "npm:pi-ask-user",
     "../npm/node_modules/pi-vim",
-    "npm:pi-subagents"
+    {
+      "source": "npm:pi-subagents",
+      "skills": [],
+      "prompts": []
+    }
   ],
   "theme": "catppuccin-mocha",
   "hideThinkingBlock": false
