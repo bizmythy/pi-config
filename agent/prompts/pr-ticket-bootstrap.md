@@ -31,6 +31,7 @@ Additional user details: $ARGUMENTS
   4. Recent commit subjects on the branch if still needed
 - When a `BWEB-\d+` key is found, verify it exists in Linear instead of assuming the text is valid.
 - Use team `BWEB` when creating a new Linear issue.
+- Set the Linear issue point estimate to `1` by default unless the user specifies a different point total.
 - If no valid ticket exists, inspect the diff and create one concise issue in Linear with:
   - A title that matches the actual work on the branch
   - A short description grounded in the diff, not speculation
