@@ -6,6 +6,7 @@ import { Markdown } from "@earendil-works/pi-tui";
 
 const PLANS_ROOT = path.join(homedir(), ".pi", "agent", "plans");
 const MAX_PLAN_CHOICES = 20;
+const FINISH_PLAN_TOOL_NAME = "finish_plan";
 
 const BASE_PLAN_PROMPT = `# Plan Mode
 
@@ -225,75 +226,102 @@ export default function planExtension(pi: ExtensionAPI) {
     ctx.ui.setStatus("plan", ctx.ui.theme.fg("warning", "plan"));
   }
 
-  pi.registerTool({
-    name: "finish_plan",
-    label: "Finish Plan",
-    description: "Finish a /plan turn after the target plan file has been written.",
-    parameters: {
-      type: "object",
-      properties: {
-        path: {
-          type: "string",
-          description: "The exact target plan file path that was written",
+  let finishPlanToolRegistered = false;
+
+  function enableFinishPlanTool() {
+    ensureFinishPlanToolRegistered();
+    const activeTools = pi.getActiveTools();
+    if (!activeTools.includes(FINISH_PLAN_TOOL_NAME)) {
+      pi.setActiveTools([...activeTools, FINISH_PLAN_TOOL_NAME]);
+    }
+  }
+
+  function disableFinishPlanTool() {
+    const activeTools = pi.getActiveTools();
+    if (activeTools.includes(FINISH_PLAN_TOOL_NAME)) {
+      pi.setActiveTools(activeTools.filter((toolName) => toolName !== FINISH_PLAN_TOOL_NAME));
+    }
+  }
+
+  function ensureFinishPlanToolRegistered() {
+    if (finishPlanToolRegistered) return;
+    finishPlanToolRegistered = true;
+
+    pi.registerTool({
+      name: FINISH_PLAN_TOOL_NAME,
+      label: "Finish Plan",
+      description: "Finish a /plan turn after the target plan file has been written.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: {
+            type: "string",
+            description: "The exact target plan file path that was written",
+          },
+          summary: {
+            type: "string",
+            description: "One-sentence summary of the plan",
+          },
         },
-        summary: {
-          type: "string",
-          description: "One-sentence summary of the plan",
-        },
+        required: ["path"],
+        additionalProperties: false,
       },
-      required: ["path"],
-      additionalProperties: false,
-    },
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const planDir =
-        activePlan.dir ?? (activePlan.path ? path.dirname(normalizeForCompare(activePlan.path, ctx.cwd)) : undefined);
-      if (!planDir) {
-        throw new Error("No active plan directory is registered.");
-      }
+      async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+        if (!planningInProgress) {
+          throw new Error("finish_plan is only available during an active /plan turn.");
+        }
 
-      const requestedPath = String(params.path);
-      const actual = normalizeForCompare(requestedPath, ctx.cwd);
-      if (!isPathDirectlyInDir(actual, planDir)) {
-        throw new Error(`finish_plan path must be inside ${planDir}; got ${requestedPath}`);
-      }
-      if (!isPlanFilename(actual)) {
-        throw new Error(`finish_plan path must end with -plan.md; got ${requestedPath}`);
-      }
+        const planDir =
+          activePlan.dir ?? (activePlan.path ? path.dirname(normalizeForCompare(activePlan.path, ctx.cwd)) : undefined);
+        if (!planDir) {
+          throw new Error("No active plan directory is registered.");
+        }
 
-      try {
-        const fileStat = await stat(actual);
-        if (!fileStat.isFile()) throw new Error("not a file");
-      } catch {
-        throw new Error(`Plan file does not exist yet: ${requestedPath}`);
-      }
+        const requestedPath = String(params.path);
+        const actual = normalizeForCompare(requestedPath, ctx.cwd);
+        if (!isPathDirectlyInDir(actual, planDir)) {
+          throw new Error(`finish_plan path must be inside ${planDir}; got ${requestedPath}`);
+        }
+        if (!isPlanFilename(actual)) {
+          throw new Error(`finish_plan path must end with -plan.md; got ${requestedPath}`);
+        }
 
-      const planMarkdown = await readFile(actual, "utf8");
-      activePlan = { ...activePlan, dir: planDir, path: actual };
-      planningInProgress = false;
-      clearPlanStatus(ctx);
-      persistPlanState();
+        try {
+          const fileStat = await stat(actual);
+          if (!fileStat.isFile()) throw new Error("not a file");
+        } catch {
+          throw new Error(`Plan file does not exist yet: ${requestedPath}`);
+        }
 
-      const reviewMarkdown = `# Plan ready for review\n\nFile: \`${activePlan.path}\`\n\n---\n\n${planMarkdown}`;
-      return {
-        content: [{ type: "text", text: reviewMarkdown }],
-        details: {
-          path: activePlan.path,
-          summary: params.summary,
-          markdown: reviewMarkdown,
-        },
-        terminate: true,
-      };
-    },
-    renderResult(result) {
-      const details = result.details as { markdown?: string } | undefined;
-      if (details?.markdown) {
-        return new Markdown(details.markdown, 0, 0, getMarkdownTheme());
-      }
-      const firstContent = result.content?.[0];
-      const fallbackText = firstContent && "text" in firstContent ? firstContent.text : "Plan saved.";
-      return new Markdown(String(fallbackText), 0, 0, getMarkdownTheme());
-    },
-  });
+        const planMarkdown = await readFile(actual, "utf8");
+        activePlan = { ...activePlan, dir: planDir, path: actual };
+        planningInProgress = false;
+        clearPlanStatus(ctx);
+        disableFinishPlanTool();
+        persistPlanState();
+
+        const reviewMarkdown = `# Plan ready for review\n\nFile: \`${activePlan.path}\`\n\n---\n\n${planMarkdown}`;
+        return {
+          content: [{ type: "text", text: reviewMarkdown }],
+          details: {
+            path: activePlan.path,
+            summary: params.summary,
+            markdown: reviewMarkdown,
+          },
+          terminate: true,
+        };
+      },
+      renderResult(result) {
+        const details = result.details as { markdown?: string } | undefined;
+        if (details?.markdown) {
+          return new Markdown(details.markdown, 0, 0, getMarkdownTheme());
+        }
+        const firstContent = result.content?.[0];
+        const fallbackText = firstContent && "text" in firstContent ? firstContent.text : "Plan saved.";
+        return new Markdown(String(fallbackText), 0, 0, getMarkdownTheme());
+      },
+    });
+  }
 
   pi.registerCommand("plan", {
     description: "Create a file-backed plan in ~/.pi/agent/plans/<timestamp>/",
@@ -315,6 +343,7 @@ export default function planExtension(pi: ExtensionAPI) {
 
       activePlan = { dir, description, createdAt };
       planningInProgress = true;
+      enableFinishPlanTool();
       persistPlanState();
       setPlanStatus(ctx);
 
@@ -371,6 +400,7 @@ export default function planExtension(pi: ExtensionAPI) {
     handler: async (_args, ctx) => {
       planningInProgress = false;
       clearPlanStatus(ctx);
+      disableFinishPlanTool();
       persistPlanState();
       ctx.ui.notify("Plan turn cancelled.", "info");
     },
@@ -429,10 +459,12 @@ export default function planExtension(pi: ExtensionAPI) {
 
     activePlan = lastState?.data?.activePlan ?? {};
     planningInProgress = false;
+    disableFinishPlanTool();
     ctx.ui.setStatus("plan", undefined);
   });
 
   pi.on("session_shutdown", async (_event, ctx) => {
     if (planningInProgress) clearPlanStatus(ctx);
+    disableFinishPlanTool();
   });
 }
