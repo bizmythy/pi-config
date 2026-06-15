@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { execFile } from "node:child_process";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const SECRET_REFS = {
@@ -20,66 +20,43 @@ const activeToolCalls = new Set<string>();
 function readOnePasswordSecrets(): Promise<Credentials> {
   return new Promise((resolve, reject) => {
     const template = Object.entries(SECRET_REFS)
-      .map(([envName, secretRef]) => `${envName}={{ ${secretRef} }`)
+      .map(([envName, secretRef]) => `${envName}={{ ${secretRef} }}`)
       .join("\n");
 
-    const child = spawn("op", ["inject"], {
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-
-    let stdout = "";
-    let stderr = "";
-
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk;
-    });
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk;
-    });
-
-    child.on("error", (err) => {
-      reject(err);
-    });
-
-    const timeout = setTimeout(() => {
-      child.kill("SIGTERM");
-      reject(new Error("timed out reading 1Password secrets"));
-    }, 15_000);
-
-    child.on("close", (code, signal) => {
-      clearTimeout(timeout);
-      if (code !== 0) {
-        const detail = (stderr || `op inject exited with code ${code ?? `signal ${signal}`}`).trim();
-        reject(new Error(detail || "failed to read 1Password secrets"));
-        return;
-      }
-
-      const credentials = Object.fromEntries(
-        stdout
-          .split("\n")
-          .filter(Boolean)
-          .map((line) => {
-            const separator = line.indexOf("=");
-            if (separator === -1) return [line, ""];
-            return [line.slice(0, separator), line.slice(separator + 1)];
-          }),
-      ) as Partial<Credentials>;
-
-      for (const envName of Object.keys(SECRET_REFS) as EnvName[]) {
-        const value = credentials[envName]?.trim();
-        if (!value) {
-          reject(new Error(`1Password returned an empty ${envName}`));
+    execFile(
+      "sh",
+      ["-c", 'printf %s "$1" | op inject', "op-inject", template],
+      { timeout: 15_000 },
+      (err, stdout, stderr) => {
+        if (err) {
+          const detail = (stderr || err.message || String(err)).trim();
+          reject(new Error(detail || "failed to read 1Password secrets"));
           return;
         }
-        credentials[envName] = value;
-      }
 
-      resolve(credentials as Credentials);
-    });
+        const credentials = Object.fromEntries(
+          stdout
+            .split("\n")
+            .filter(Boolean)
+            .map((line) => {
+              const separator = line.indexOf("=");
+              if (separator === -1) return [line, ""];
+              return [line.slice(0, separator), line.slice(separator + 1)];
+            }),
+        ) as Partial<Credentials>;
 
-    child.stdin.end(template);
+        for (const envName of Object.keys(SECRET_REFS) as EnvName[]) {
+          const value = credentials[envName]?.trim();
+          if (!value) {
+            reject(new Error(`1Password returned an empty ${envName}`));
+            return;
+          }
+          credentials[envName] = value;
+        }
+
+        resolve(credentials as Credentials);
+      },
+    );
   });
 }
 
