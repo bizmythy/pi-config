@@ -9,6 +9,7 @@ import {
   DEFAULT_MAX_LINES,
   type ExtensionAPI,
   formatSize,
+  highlightCode,
   keyHint,
   type TruncationResult,
   truncateTail,
@@ -241,10 +242,8 @@ function formatPythonCall(
   if (code === undefined) return `${header}\n${theme.fg("error", "invalid code")}`;
   if (code.length === 0) return `${header}\n${theme.fg("toolOutput", "...")}`;
 
-  const styledCode = code
-    .split("\n")
-    .map((line) => theme.fg("toolOutput", line))
-    .join("\n");
+  const highlightedLines = highlightCode(code.replace(/\t/g, "  "), "python");
+  const styledCode = highlightedLines.length > 0 ? highlightedLines.join("\n") : theme.fg("toolOutput", code);
   return `${header}\n${styledCode}`;
 }
 
