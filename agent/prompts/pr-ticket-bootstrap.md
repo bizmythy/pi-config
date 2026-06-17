@@ -1,6 +1,6 @@
 ---
 description: "Ensure the current git branch has a linked Linear ticket and GitHub PR."
-argument-hint: "[ready for review]"
+argument-hint: "[--open|-o]"
 ---
 
 # PR Ticket Bootstrap
@@ -15,7 +15,7 @@ Additional user details: $ARGUMENTS
 2. Inspect the branch diff before creating or renaming anything. Prefer the repository default branch as the merge base.
 3. Find any existing PR and Linear ticket for the branch.
 4. Create or update only the missing/stale bookkeeping.
-5. Present the PR URL and handle ready-for-review status.
+5. Present the PR URL and handle draft/open status.
 
 ## Branch and PR Discovery
 
@@ -53,23 +53,25 @@ Additional user details: $ARGUMENTS
 ## Creation and Updates
 
 - If no valid ticket exists, create one concise Linear issue.
-- If no PR exists, create a draft PR using the ticket key in the title.
+- If no PR exists, create a draft PR using the ticket key in the title unless the user passed `--open` or `-o` in the prompt arguments.
+- If the user passed `--open` or `-o` and no PR exists, create the PR as ready for review instead of draft.
 - If a PR already exists and its title is clearly stale or missing the ticket prefix, update it when the correct title is clear from the diff.
 - If a PR already exists and its body is empty or obviously template-placeholder content, update it using the repository template.
 
-## Ready for Review
+## Draft/Open Status
 
-- Do not mark a PR ready for review by default.
-- If the user explicitly asked to open it for review in the initial request, mark the PR ready without asking again.
-- Otherwise, after the PR exists, present the PR URL and ask whether they want it set ready for review.
-- If the PR is already ready, say so instead of trying to change it.
+- Treat PRs as draft by default.
+- Only create or mark a PR ready for review when the prompt arguments include `--open` or `-o`.
+- If `--open` or `-o` is present and the PR already exists as a draft, mark it ready for review without asking again.
+- If `--open` or `-o` is absent and the PR already exists as ready for review, leave it ready and say so instead of trying to change it back to draft.
+- Do not ask whether to set the PR ready for review.
 
 ## Output
 
 - Always give the user the PR URL once one exists.
 - State whether the Linear issue was found or created, and include its identifier.
 - State whether the PR was found, created, or updated.
-- End with the ready-for-review question unless the user already answered it in the original request.
+- State whether the PR is draft or ready for review.
 
 ## Guardrails
 
