@@ -552,6 +552,7 @@ export default function addressReviewCommentsExtension(pi: ExtensionAPI) {
         };
         pi.appendEntry("address-review-comments-state", activeWorkflow);
         setWorkflowStatus(ctx, true);
+        enableCheckpointTool();
 
         const summary = summarizeFetch(payload);
         ctx.ui.notify(`Fetched ${threads.length} unresolved review thread(s). Starting agent workflow.`, "info");
@@ -563,180 +564,208 @@ export default function addressReviewCommentsExtension(pi: ExtensionAPI) {
     },
   });
 
-  pi.registerTool({
-    name: "address_review_checkpoint",
-    label: "Review Checkpoint",
-    description:
-      "Present a review-comment checkpoint to the user. Use for every review-comment reply decision; the tool handles approved submissions after human review.",
-    promptSnippet: "Present a review-comment checkpoint for human approval before any reply is submitted",
-    promptGuidelines: [
-      "Use address_review_checkpoint for every PR review-comment reply decision; do not submit review-comment replies any other way.",
-      "After address_review_checkpoint returns edit or feedback, update the draft or code and call address_review_checkpoint again for the same thread.",
-      "After address_review_checkpoint returns skip, revert changes for that thread and continue to the next thread.",
-    ],
-    parameters: {
-      type: "object",
-      properties: {
-        threadId: {
-          type: "string",
-          description: "GitHub review thread id from the fetched review payload",
+  let checkpointToolRegistered = false;
+
+  function enableCheckpointTool() {
+    ensureCheckpointToolRegistered();
+    const activeTools = pi.getActiveTools();
+    if (!activeTools.includes("address_review_checkpoint")) {
+      pi.setActiveTools([...activeTools, "address_review_checkpoint"]);
+    }
+  }
+
+  function disableCheckpointTool() {
+    const activeTools = pi.getActiveTools();
+    if (activeTools.includes("address_review_checkpoint")) {
+      pi.setActiveTools(activeTools.filter((toolName) => toolName !== "address_review_checkpoint"));
+    }
+  }
+
+  function ensureCheckpointToolRegistered() {
+    if (checkpointToolRegistered) return;
+    checkpointToolRegistered = true;
+
+    pi.registerTool({
+      name: "address_review_checkpoint",
+      label: "Review Checkpoint",
+      description:
+        "Present a review-comment checkpoint to the user. Use for every review-comment reply decision; the tool handles approved submissions after human review.",
+      promptSnippet: "Present a review-comment checkpoint for human approval before any reply is submitted",
+      promptGuidelines: [
+        "Use address_review_checkpoint for every PR review-comment reply decision; do not submit review-comment replies any other way.",
+        "After address_review_checkpoint returns edit or feedback, update the draft or code and call address_review_checkpoint again for the same thread.",
+        "After address_review_checkpoint returns skip, revert changes for that thread and continue to the next thread.",
+      ],
+      parameters: {
+        type: "object",
+        properties: {
+          threadId: {
+            type: "string",
+            description: "GitHub review thread id from the fetched review payload",
+          },
+          location: {
+            type: "string",
+            description: "Human-readable file:line location for this thread",
+          },
+          reviewer: {
+            type: "string",
+            description: "Reviewer login, if known",
+          },
+          checkpointMarkdown: {
+            type: "string",
+            description: "Markdown summary for the user: comment, analysis, changes, and relevant diff excerpt",
+          },
+          draftReply: {
+            type: "string",
+            description: "Exact reply body proposed for posting if the user approves",
+          },
+          recommendedAction: {
+            type: "string",
+            enum: ["resolve", "post"],
+            description: "Recommended approval action for display only",
+          },
         },
-        location: {
-          type: "string",
-          description: "Human-readable file:line location for this thread",
-        },
-        reviewer: {
-          type: "string",
-          description: "Reviewer login, if known",
-        },
-        checkpointMarkdown: {
-          type: "string",
-          description: "Markdown summary for the user: comment, analysis, changes, and relevant diff excerpt",
-        },
-        draftReply: {
-          type: "string",
-          description: "Exact reply body proposed for posting if the user approves",
-        },
-        recommendedAction: {
-          type: "string",
-          enum: ["resolve", "post"],
-          description: "Recommended approval action for display only",
-        },
+        required: ["threadId", "location", "checkpointMarkdown", "draftReply"],
+        additionalProperties: false,
       },
-      required: ["threadId", "location", "checkpointMarkdown", "draftReply"],
-      additionalProperties: false,
-    },
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      if (!ctx.hasUI) {
-        throw new Error("address_review_checkpoint requires an interactive UI because human review is mandatory.");
-      }
-      if (!activeWorkflow) {
-        throw new Error("No active /address-review-comments workflow. Start one with /address-review-comments first.");
-      }
+      async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+        if (!ctx.hasUI) {
+          throw new Error("address_review_checkpoint requires an interactive UI because human review is mandatory.");
+        }
+        if (!activeWorkflow) {
+          throw new Error(
+            "No active /address-review-comments workflow. Start one with /address-review-comments first.",
+          );
+        }
 
-      const checkpoint = params as CheckpointParams;
-      const selectedOption = await ctx.ui.custom<CheckpointOption | undefined>(
-        (tui, theme, _keybindings, done) => new ReviewCheckpointDialog(tui, theme, checkpoint, done),
-        {
-          overlay: true,
-          overlayOptions: { anchor: "center", width: "90%", maxHeight: "90%", margin: 1 },
-        },
-      );
+        const checkpoint = params as CheckpointParams;
+        const selectedOption = await ctx.ui.custom<CheckpointOption | undefined>(
+          (tui, theme, _keybindings, done) => new ReviewCheckpointDialog(tui, theme, checkpoint, done),
+          {
+            overlay: true,
+            overlayOptions: { anchor: "center", width: "90%", maxHeight: "90%", margin: 1 },
+          },
+        );
 
-      if (!selectedOption) {
-        const finishedWorkflow = { ...activeWorkflow, active: false, finishedAt: new Date().toISOString() };
-        activeWorkflow = undefined;
-        pi.appendEntry("address-review-comments-state", finishedWorkflow);
-        setWorkflowStatus(ctx, false);
-        return {
-          content: [
-            {
-              type: "text",
-              text: "User dismissed the checkpoint. Treat this as abort: stop processing remaining comments and summarize current state.",
-            },
-          ],
-          details: { selectedOption: "abort", threadId: checkpoint.threadId },
-        };
-      }
-
-      if (selectedOption === "edit" || selectedOption === "feedback") {
-        const prompt =
-          selectedOption === "edit"
-            ? "Describe how the draft reply should be edited."
-            : "Provide feedback for the agent to address before recreating this checkpoint.";
-        const userText = await ctx.ui.editor(prompt, "");
-        return {
-          content: [
-            {
-              type: "text",
-              text: `User selected ${selectedOption}. User input:\n\n${userText ?? ""}\n\nIncorporate this input, then call address_review_checkpoint again for the same thread.`,
-            },
-          ],
-          details: { selectedOption, threadId: checkpoint.threadId, userText: userText ?? "" },
-        };
-      }
-
-      if (selectedOption === "skip" || selectedOption === "abort") {
-        if (selectedOption === "abort") {
+        if (!selectedOption) {
           const finishedWorkflow = { ...activeWorkflow, active: false, finishedAt: new Date().toISOString() };
           activeWorkflow = undefined;
           pi.appendEntry("address-review-comments-state", finishedWorkflow);
           setWorkflowStatus(ctx, false);
+          disableCheckpointTool();
+          return {
+            content: [
+              {
+                type: "text",
+                text: "User dismissed the checkpoint. Treat this as abort: stop processing remaining comments and summarize current state.",
+              },
+            ],
+            details: { selectedOption: "abort", threadId: checkpoint.threadId },
+          };
         }
+
+        if (selectedOption === "edit" || selectedOption === "feedback") {
+          const prompt =
+            selectedOption === "edit"
+              ? "Describe how the draft reply should be edited."
+              : "Provide feedback for the agent to address before recreating this checkpoint.";
+          const userText = await ctx.ui.editor(prompt, "");
+          return {
+            content: [
+              {
+                type: "text",
+                text: `User selected ${selectedOption}. User input:\n\n${userText ?? ""}\n\nIncorporate this input, then call address_review_checkpoint again for the same thread.`,
+              },
+            ],
+            details: { selectedOption, threadId: checkpoint.threadId, userText: userText ?? "" },
+          };
+        }
+
+        if (selectedOption === "skip" || selectedOption === "abort") {
+          if (selectedOption === "abort") {
+            const finishedWorkflow = { ...activeWorkflow, active: false, finishedAt: new Date().toISOString() };
+            activeWorkflow = undefined;
+            pi.appendEntry("address-review-comments-state", finishedWorkflow);
+            setWorkflowStatus(ctx, false);
+            disableCheckpointTool();
+          }
+
+          return {
+            content: [
+              {
+                type: "text",
+                text:
+                  selectedOption === "skip"
+                    ? "User selected skip. Revert changes made for this thread, post no reply, track it as skipped, and continue."
+                    : "User selected abort. Stop processing remaining comments and summarize current state.",
+              },
+            ],
+            details: { selectedOption, threadId: checkpoint.threadId },
+          };
+        }
+
+        const replyResponsePath = await runReply(
+          pi,
+          activeWorkflow,
+          checkpoint.threadId,
+          checkpoint.draftReply,
+          selectedOption === "resolve",
+        );
+        pi.appendEntry("address-review-comments-checkpoint", {
+          threadId: checkpoint.threadId,
+          selectedOption,
+          replyResponsePath,
+          location: checkpoint.location,
+        });
 
         return {
           content: [
             {
               type: "text",
-              text:
-                selectedOption === "skip"
-                  ? "User selected skip. Revert changes made for this thread, post no reply, track it as skipped, and continue."
-                  : "User selected abort. Stop processing remaining comments and summarize current state.",
+              text: `User selected ${selectedOption}. Reply submitted. Response JSON file: ${replyResponsePath}\n\nInspect the response file if needed, then continue to the next review thread.`,
             },
           ],
-          details: { selectedOption, threadId: checkpoint.threadId },
+          details: { selectedOption, threadId: checkpoint.threadId, replyResponsePath },
         };
-      }
+      },
+      renderCall(args) {
+        const location = typeof args.location === "string" ? args.location : "unknown location";
+        const reviewer = typeof args.reviewer === "string" ? `@${args.reviewer}` : undefined;
+        const checkpointMarkdown =
+          typeof args.checkpointMarkdown === "string" ? args.checkpointMarkdown : "No checkpoint summary provided.";
+        const draftReply = typeof args.draftReply === "string" ? args.draftReply : "";
+        const recommendedAction =
+          args.recommendedAction === "resolve" || args.recommendedAction === "post"
+            ? args.recommendedAction
+            : undefined;
 
-      const replyResponsePath = await runReply(
-        pi,
-        activeWorkflow,
-        checkpoint.threadId,
-        checkpoint.draftReply,
-        selectedOption === "resolve",
-      );
-      pi.appendEntry("address-review-comments-checkpoint", {
-        threadId: checkpoint.threadId,
-        selectedOption,
-        replyResponsePath,
-        location: checkpoint.location,
-      });
+        const metadata = [
+          `**Location:** \`${location}\``,
+          reviewer ? `**Reviewer:** ${reviewer}` : undefined,
+          recommendedAction ? `**Recommended action:** \`${recommendedAction}\`` : undefined,
+        ]
+          .filter((line): line is string => Boolean(line))
+          .join("\n");
 
-      return {
-        content: [
-          {
-            type: "text",
-            text: `User selected ${selectedOption}. Reply submitted. Response JSON file: ${replyResponsePath}\n\nInspect the response file if needed, then continue to the next review thread.`,
-          },
-        ],
-        details: { selectedOption, threadId: checkpoint.threadId, replyResponsePath },
-      };
-    },
-    renderCall(args) {
-      const location = typeof args.location === "string" ? args.location : "unknown location";
-      const reviewer = typeof args.reviewer === "string" ? `@${args.reviewer}` : undefined;
-      const checkpointMarkdown =
-        typeof args.checkpointMarkdown === "string" ? args.checkpointMarkdown : "No checkpoint summary provided.";
-      const draftReply = typeof args.draftReply === "string" ? args.draftReply : "";
-      const recommendedAction =
-        args.recommendedAction === "resolve" || args.recommendedAction === "post" ? args.recommendedAction : undefined;
+        const markdown = `## Review checkpoint\n\n${metadata}\n\n---\n\n${checkpointMarkdown}\n\n---\n\n### Draft reply\n\n${draftReply}`;
+        return new Markdown(markdown, 0, 0, getMarkdownTheme());
+      },
+      renderResult(result, _options, theme) {
+        const details = result.details as
+          | { selectedOption?: string; replyResponsePath?: string; userText?: string }
+          | undefined;
+        if (!details?.selectedOption) {
+          const first = result.content[0];
+          return new Text(first?.type === "text" ? first.text : "", 0, 0);
+        }
 
-      const metadata = [
-        `**Location:** \`${location}\``,
-        reviewer ? `**Reviewer:** ${reviewer}` : undefined,
-        recommendedAction ? `**Recommended action:** \`${recommendedAction}\`` : undefined,
-      ]
-        .filter((line): line is string => Boolean(line))
-        .join("\n");
-
-      const markdown = `## Review checkpoint\n\n${metadata}\n\n---\n\n${checkpointMarkdown}\n\n---\n\n### Draft reply\n\n${draftReply}`;
-      return new Markdown(markdown, 0, 0, getMarkdownTheme());
-    },
-    renderResult(result, _options, theme) {
-      const details = result.details as
-        | { selectedOption?: string; replyResponsePath?: string; userText?: string }
-        | undefined;
-      if (!details?.selectedOption) {
-        const first = result.content[0];
-        return new Text(first?.type === "text" ? first.text : "", 0, 0);
-      }
-
-      let text = `${theme.fg("success", "✓")} ${theme.fg("accent", details.selectedOption)}`;
-      if (details.replyResponsePath) text += `\n${theme.fg("dim", `response: ${details.replyResponsePath}`)}`;
-      if (details.userText) text += `\n${theme.fg("dim", "user input provided")}`;
-      return new Text(text, 0, 0);
-    },
-  });
+        let text = `${theme.fg("success", "✓")} ${theme.fg("accent", details.selectedOption)}`;
+        if (details.replyResponsePath) text += `\n${theme.fg("dim", `response: ${details.replyResponsePath}`)}`;
+        if (details.userText) text += `\n${theme.fg("dim", "user input provided")}`;
+        return new Text(text, 0, 0);
+      },
+    });
+  }
 
   pi.on("tool_call", async (event) => {
     if (event.toolName === "read" && isReplacedSkillPath(event.input.path)) {
@@ -784,10 +813,16 @@ export default function addressReviewCommentsExtension(pi: ExtensionAPI) {
       .pop() as { data?: WorkflowState } | undefined;
 
     activeWorkflow = lastState?.data?.active === false ? undefined : lastState?.data;
+    if (activeWorkflow) {
+      enableCheckpointTool();
+    } else {
+      disableCheckpointTool();
+    }
     setWorkflowStatus(ctx, Boolean(activeWorkflow));
   });
 
   pi.on("session_shutdown", async (_event, ctx) => {
     setWorkflowStatus(ctx, false);
+    disableCheckpointTool();
   });
 }
