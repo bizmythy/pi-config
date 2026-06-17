@@ -4,6 +4,9 @@ agent/auth.json
 agent/sessions/
 agent/plans/
 
+# usage tracking, not helpful
+exa-usage.json
+
 # Common local-only files.
 .env
 .env.*
