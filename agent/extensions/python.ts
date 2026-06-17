@@ -235,18 +235,17 @@ function formatPythonCall(
   const toolArgs = args as { code?: unknown; timeout?: unknown } | undefined;
   const code = typeof toolArgs?.code === "string" ? toolArgs.code : undefined;
   const timeout = typeof toolArgs?.timeout === "number" ? toolArgs.timeout : undefined;
-  const firstLine = code
-    ?.split("\n")
-    .find((line) => line.trim().length > 0)
-    ?.trim();
-  const lineCount = code ? code.split("\n").length : 0;
-  const codeSummary = firstLine
-    ? `${firstLine}${lineCount > 1 ? theme.fg("muted", ` (${lineCount} lines)`) : ""}`
-    : code === undefined
-      ? theme.fg("error", "invalid code")
-      : theme.fg("toolOutput", "...");
   const timeoutSuffix = timeout ? theme.fg("muted", ` (timeout ${timeout}s)`) : "";
-  return theme.fg("toolTitle", theme.bold(`python ${codeSummary}`)) + timeoutSuffix;
+  const header = theme.fg("toolTitle", theme.bold("python")) + timeoutSuffix;
+
+  if (code === undefined) return `${header}\n${theme.fg("error", "invalid code")}`;
+  if (code.length === 0) return `${header}\n${theme.fg("toolOutput", "...")}`;
+
+  const styledCode = code
+    .split("\n")
+    .map((line) => theme.fg("toolOutput", line))
+    .join("\n");
+  return `${header}\n${styledCode}`;
 }
 
 function rebuildPythonResultRenderComponent(
