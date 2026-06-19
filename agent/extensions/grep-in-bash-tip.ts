@@ -1,6 +1,8 @@
-import type { ExtensionAPI, ToolResultEvent } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-const GREP_IN_BASH_TIP = "Tip: Use `rg` (ripgrep) instead of `grep` for faster searching.";
+const GREP_IN_BASH_GUIDANCE = `AGENT DIRECTIVE: Avoid \`grep\` in bash commands. Use \`rg\` (ripgrep) instead unless the user explicitly requires GNU grep behavior.`;
+
+const GUIDANCE_MESSAGE_TYPE = "grep-in-bash-guidance";
 
 const grepCommandPattern =
   /(?:^|\n|[;|&]{1,2}|\()\s*(?:!+\s*)?(?:(?:[A-Za-z_][A-Za-z0-9_]*=\S+|sudo|command|time|nice|nohup)\s+)*(?:\S+\/)?grep\b/m;
@@ -59,10 +61,6 @@ function usesGrepCommand(command: string): boolean {
   return grepCommandPattern.test(maskQuotedTextAndComments(command));
 }
 
-function appendTip(content: ToolResultEvent["content"]): ToolResultEvent["content"] {
-  return [...content, { type: "text", text: `\n\n${GREP_IN_BASH_TIP}` }];
-}
-
 export default function (pi: ExtensionAPI) {
   pi.on("tool_result", (event) => {
     if (event.toolName !== "bash") return undefined;
@@ -70,6 +68,16 @@ export default function (pi: ExtensionAPI) {
     const command = (event.input as { command?: unknown }).command;
     if (typeof command !== "string" || !usesGrepCommand(command)) return undefined;
 
-    return { content: appendTip(event.content) };
+    pi.sendMessage(
+      {
+        customType: GUIDANCE_MESSAGE_TYPE,
+        content: GREP_IN_BASH_GUIDANCE,
+        display: false,
+        details: { command, toolCallId: event.toolCallId },
+      },
+      { deliverAs: "steer" },
+    );
+
+    return undefined;
   });
 }
