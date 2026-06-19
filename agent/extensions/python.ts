@@ -19,6 +19,12 @@ import { Container, Text, truncateToWidth } from "@earendil-works/pi-tui";
 
 const PYTHON_PREVIEW_LINES = 5;
 const PYTHON_UPDATE_THROTTLE_MS = 100;
+const PYTHON_IN_BASH_GUIDANCE =
+  "Reminder: For ad hoc or inline Python, use the `python` tool instead of invoking `python`, `python3`, or `uv run python` from the `bash` tool. Bash is still fine for existing scripts, project CLIs, and shell pipelines.";
+const PYTHON_IN_BASH_GUIDANCE_MESSAGE_TYPE = "python-in-bash-guidance";
+
+const inlinePythonInBashPattern =
+  /(?:^|\n|[;|&]{1,2}|\()\s*(?:!+\s*)?(?:(?:[A-Za-z_][A-Za-z0-9_]*=\S+|sudo|command|time|nice|nohup|env)\s+)*(?:(?:uv\s+run(?:\s+(?!python(?:3(?:\.\d+)?)?\b)\S+)*\s+python(?:3(?:\.\d+)?)?)|(?:\S+\/)?python(?:3(?:\.\d+)?)?)\b[^\n;|&]*(?:\s-c(?:\s|$)|(?:\s-\s*)?<<|\s-\s*(?:$|\n))/m;
 
 const pythonSchema = {
   type: "object",
@@ -59,6 +65,60 @@ function defaultTempFilePath(prefix: string) {
 
 function byteLength(text: string) {
   return Buffer.byteLength(text, "utf-8");
+}
+
+function maskQuotedTextAndComments(command: string): string {
+  let masked = "";
+  let quote: "'" | '"' | undefined;
+  let escaped = false;
+
+  for (let i = 0; i < command.length; i++) {
+    const char = command[i] ?? "";
+
+    if (quote) {
+      if (quote === '"' && escaped) {
+        escaped = false;
+        masked += char === "\n" ? "\n" : " ";
+        continue;
+      }
+
+      if (quote === '"' && char === "\\") {
+        escaped = true;
+        masked += " ";
+        continue;
+      }
+
+      if (char === quote) {
+        quote = undefined;
+      }
+
+      masked += char === "\n" ? "\n" : " ";
+      continue;
+    }
+
+    if (char === "'" || char === '"') {
+      quote = char;
+      masked += " ";
+      continue;
+    }
+
+    if (char === "#" && (i === 0 || /\s/.test(command[i - 1] ?? ""))) {
+      while (i < command.length && command[i] !== "\n") {
+        masked += " ";
+        i++;
+      }
+      if (i < command.length) masked += "\n";
+      continue;
+    }
+
+    masked += char;
+  }
+
+  return masked;
+}
+
+function usesInlinePythonInBash(command: string): boolean {
+  return inlinePythonInBashPattern.test(maskQuotedTextAndComments(command));
 }
 
 class OutputAccumulator {
@@ -343,13 +403,34 @@ async function assertCwdExists(cwd: string) {
 export default function (pi: ExtensionAPI) {
   const ops = createLocalBashOperations();
 
+  pi.on("tool_result", (event) => {
+    if (event.toolName !== "bash") return undefined;
+
+    const command = (event.input as { command?: unknown }).command;
+    if (typeof command !== "string" || !usesInlinePythonInBash(command)) return undefined;
+
+    pi.sendMessage(
+      {
+        customType: PYTHON_IN_BASH_GUIDANCE_MESSAGE_TYPE,
+        content: PYTHON_IN_BASH_GUIDANCE,
+        display: false,
+        details: { command, toolCallId: event.toolCallId },
+      },
+      { deliverAs: "steer" },
+    );
+
+    return undefined;
+  });
+
   pi.registerTool({
     name: "python",
     label: "python",
-    description: `Execute Python code in the current working directory via \`uv run python -\`. Returns stdout and stderr. Output is truncated to last ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds.`,
-    promptSnippet: "Execute Python code via uv run python in the current project environment",
+    description: `Execute Python code in the current working directory via \`uv run python -\`. Prefer this tool over invoking \`python\`, \`python3\`, or \`uv run python\` from bash for ad hoc or inline Python. Returns stdout and stderr. Output is truncated to last ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds.`,
+    promptSnippet:
+      "Execute inline Python code via uv run python in the current project environment; prefer this over python/python3 in bash",
     promptGuidelines: [
-      "Use python when Python code is clearer than shell commands; the python tool runs code with `uv run python -` in the current project directory so it uses the project's uv/pyproject environment.",
+      "Use python for ad hoc or inline Python execution instead of calling `python`, `python3`, or `uv run python` from bash; pass the script body as the `code` argument.",
+      "Use bash for existing Python scripts with CLI arguments, project commands, or larger shell workflows, but use python for temporary inspection/transformation scripts.",
     ],
     parameters: pythonSchema,
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
