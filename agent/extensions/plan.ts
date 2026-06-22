@@ -4,7 +4,7 @@ import path from "node:path";
 import { type ExtensionAPI, type ExtensionContext, getMarkdownTheme } from "@earendil-works/pi-coding-agent";
 import { Markdown } from "@earendil-works/pi-tui";
 
-const PLANS_ROOT = path.join(homedir(), ".pi", "agent", "plans");
+const PLANS_ROOT = path.join(homedir(), "pCloudDrive", "pi-agent", "plans");
 const MAX_PLAN_CHOICES = 20;
 const FINISH_PLAN_TOOL_NAME = "finish_plan";
 
@@ -123,14 +123,23 @@ function isPlanFilename(filePath: string): boolean {
   return path.basename(filePath).endsWith("-plan.md");
 }
 
-async function listPlanFiles(): Promise<PlanFile[]> {
-  let dirs: string[];
+async function ensurePlansRootExists(): Promise<void> {
   try {
-    dirs = await readdir(PLANS_ROOT);
+    const rootStat = await stat(PLANS_ROOT);
+    if (!rootStat.isDirectory()) {
+      throw new Error(`Plan path exists but is not a directory: ${PLANS_ROOT}`);
+    }
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      throw new Error(`Plan directory does not exist: ${PLANS_ROOT}`);
+    }
     throw error;
   }
+}
+
+async function listPlanFiles(): Promise<PlanFile[]> {
+  await ensurePlansRootExists();
+  const dirs = await readdir(PLANS_ROOT);
 
   const plans: PlanFile[] = [];
   for (const dirname of dirs) {
@@ -166,7 +175,11 @@ async function listPlanFiles(): Promise<PlanFile[]> {
     }
   }
 
-  return plans.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  return plans.sort((a, b) => {
+    const dirCompare = path.basename(b.dir).localeCompare(path.basename(a.dir));
+    if (dirCompare !== 0) return dirCompare;
+    return b.mtimeMs - a.mtimeMs;
+  });
 }
 
 function formatPlanLabel(plan: PlanFile, index: number): string {
@@ -324,7 +337,7 @@ export default function planExtension(pi: ExtensionAPI) {
   }
 
   pi.registerCommand("plan", {
-    description: "Create a file-backed plan in ~/.pi/agent/plans/<timestamp>/",
+    description: "Create a file-backed plan in ~/pCloudDrive/pi-agent/plans/<timestamp>/",
     getArgumentCompletions: () => null,
     handler: async (args, ctx) => {
       const description = args.trim();
@@ -337,9 +350,11 @@ export default function planExtension(pi: ExtensionAPI) {
         return;
       }
 
+      await ensurePlansRootExists();
+
       const createdAt = timestamp();
       const dir = path.join(PLANS_ROOT, createdAt);
-      await mkdir(dir, { recursive: true });
+      await mkdir(dir);
 
       activePlan = { dir, description, createdAt };
       planningInProgress = true;
