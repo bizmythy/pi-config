@@ -15,7 +15,7 @@ type EnvSnapshot = Partial<Record<EnvName, string | undefined>>;
 let cachedCredentials: Credentials | null = null;
 let credentialsPromise: Promise<Credentials> | null = null;
 let envSnapshot: EnvSnapshot | null = null;
-const activeToolCalls = new Set<string>();
+let credentialsExposed = false;
 
 function readOnePasswordSecrets(): Promise<Credentials> {
   return new Promise((resolve, reject) => {
@@ -76,23 +76,26 @@ async function getWebAccessCredentials(): Promise<Credentials> {
   return credentialsPromise;
 }
 
-async function exposeCredentialsForToolCall(toolCallId: string): Promise<void> {
-  const credentials = await getWebAccessCredentials();
-  if (activeToolCalls.size === 0) {
+function applyCredentialsToEnvironment(credentials: Credentials): void {
+  if (!envSnapshot) {
     envSnapshot = {};
     for (const envName of Object.keys(SECRET_REFS) as EnvName[]) {
       envSnapshot[envName] = process.env[envName];
     }
   }
-  activeToolCalls.add(toolCallId);
+
   for (const [envName, value] of Object.entries(credentials) as Array<[EnvName, string]>) {
     process.env[envName] = value;
   }
+  credentialsExposed = true;
 }
 
-function restoreEnvForToolCall(toolCallId: string): void {
-  if (!activeToolCalls.delete(toolCallId)) return;
-  if (activeToolCalls.size > 0) return;
+async function exposeCredentials(): Promise<void> {
+  applyCredentialsToEnvironment(await getWebAccessCredentials());
+}
+
+function restoreEnvironment(): void {
+  if (!credentialsExposed) return;
 
   for (const envName of Object.keys(SECRET_REFS) as EnvName[]) {
     const previous = envSnapshot?.[envName];
@@ -103,6 +106,7 @@ function restoreEnvForToolCall(toolCallId: string): void {
     }
   }
   envSnapshot = null;
+  credentialsExposed = false;
 }
 
 export default function (pi: ExtensionAPI) {
@@ -110,27 +114,23 @@ export default function (pi: ExtensionAPI) {
     if (!RELEVANT_TOOLS.has(event.toolName)) return;
 
     try {
-      await exposeCredentialsForToolCall(event.toolCallId);
+      await exposeCredentials();
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       ctx.ui.notify(`Could not read web access API keys from 1Password: ${message}`, "error");
     }
   });
 
-  pi.on("tool_execution_end", async (event) => {
-    restoreEnvForToolCall(event.toolCallId);
-  });
-
   pi.on("session_shutdown", async () => {
-    for (const id of [...activeToolCalls]) restoreEnvForToolCall(id);
+    restoreEnvironment();
   });
 
   pi.registerCommand("web-access-op", {
-    description: "Check/preload the Gemini and Exa API keys from 1Password without writing them to disk",
+    description: "Expose the Gemini and Exa API keys from 1Password to web access tools for this Pi session",
     handler: async (_args, ctx) => {
       try {
-        await getWebAccessCredentials();
-        ctx.ui.notify("Gemini and Exa API keys loaded from 1Password into memory for this Pi process.", "info");
+        await exposeCredentials();
+        ctx.ui.notify("Gemini and Exa API keys are available to web access tools for this Pi session.", "info");
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         ctx.ui.notify(`Web access API keys unavailable: ${message}`, "error");
