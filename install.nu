@@ -5,6 +5,7 @@
 # What this does:
 # - installs the local npm workspace under ./npm
 # - applies patch-package patches from ./patches via npm postinstall
+# - applies patch-package patches from ./agent/patches to Pi-managed npm packages
 # - updates/installs Pi-managed npm packages from agent/settings.json
 # - verifies that the Linear CLI is authenticated
 # - verifies that Pi can resolve the configured packages
@@ -22,6 +23,25 @@ def command-exists [cmd: string] {
 def linear-authenticated [] {
   let result = (do { ^linear auth whoami } | complete)
   $result.exit_code == 0
+}
+
+def apply-agent-npm-patches [npm_dir: string, agent_dir: string] {
+  let patch_package = ($npm_dir | path join "node_modules" ".bin" "patch-package")
+  let patch_dir = ($agent_dir | path join "patches")
+  let patch_dir_relative = "../patches"
+  let agent_npm_dir = ($agent_dir | path join "npm")
+
+  if not ($patch_package | path exists) {
+    error make {msg: $"Missing patch-package binary: ($patch_package)"}
+  }
+
+  if not ($patch_dir | path exists) {
+    print $"==> No agent npm patches found: ($patch_dir)"
+    return
+  }
+
+  print "==> Applying Pi-managed npm package patches"
+  do { cd $agent_npm_dir; ^$patch_package --patch-dir $patch_dir_relative --error-on-fail }
 }
 
 def main [
@@ -122,6 +142,8 @@ def main [
     print "==> Updating/installing Pi-managed packages from settings"
     ^pi update --extensions
   }
+
+  apply-agent-npm-patches $npm_dir $agent_dir
 
   if not $skip_pi_list {
     print "==> Verifying Pi package resolution"
