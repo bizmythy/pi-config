@@ -1,0 +1,16 @@
+{
+	"companionSuggestions": {
+		"packages": {
+			"pi-intercom": {
+				"dismissed": {
+					"user": true
+				}
+			},
+			"pi-prompt-template-model": {
+				"dismissed": {
+					"user": true
+				}
+			}
+		}
+	}
+}
