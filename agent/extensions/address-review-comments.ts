@@ -20,7 +20,9 @@ import {
   visibleWidth,
 } from "@earendil-works/pi-tui";
 
-const REVIEW_SCRIPT_RELATIVE_PATH = "dev_tools/review/address_comments.py";
+const GO_REVIEW_COMMAND = "review";
+const GO_REVIEW_COMMENTS_RELATIVE_PATH = "cmd/review";
+const OLD_REVIEW_SCRIPT_RELATIVE_PATH = "dev_tools/review/address_comments.py";
 const REPLY_TEMPLATES_RELATIVE_PATH =
   "generate/agentskills/manual_skills/address-review-comments/references/comment-reply-templates.md";
 const REPLACED_SKILL_NAME = "address-review-comments";
@@ -48,8 +50,11 @@ interface CheckpointParams {
   recommendedAction?: "resolve" | "post";
 }
 
+type ReviewFlow = { kind: "go" } | { kind: "python" };
+
 interface WorkflowState {
   repoRoot: string;
+  reviewFlow?: ReviewFlow;
   fetchResponsePath: string;
   startCommitShort: string;
   prNumber?: number;
@@ -73,6 +78,7 @@ interface FetchPayload {
 
 interface RepoResolution {
   repoRoot: string;
+  reviewFlow: ReviewFlow;
   remoteSlug?: string;
 }
 
@@ -148,6 +154,49 @@ function summarizeFetch(payload: FetchPayload): string {
     .join("\n");
 }
 
+async function pathExists(filePath: string): Promise<boolean> {
+  try {
+    await access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function reviewFlowLabel(flow: ReviewFlow): string {
+  return flow.kind === "go" ? `${GO_REVIEW_COMMAND} comments` : `uv run ${OLD_REVIEW_SCRIPT_RELATIVE_PATH}`;
+}
+
+async function selectReviewFlow(pi: ExtensionAPI, repoRoot: string): Promise<ReviewFlow> {
+  const goCommandPath = path.join(repoRoot, GO_REVIEW_COMMENTS_RELATIVE_PATH);
+  const hasGoReviewCommand = await pathExists(goCommandPath);
+  let goReviewFailure: string | undefined;
+
+  if (hasGoReviewCommand) {
+    try {
+      const result = await pi.exec(GO_REVIEW_COMMAND, ["comments", "--help"], { cwd: repoRoot, timeout: 10_000 });
+      if (result.code === 0) return { kind: "go" };
+      goReviewFailure = (result.stderr || result.stdout).trim();
+    } catch (error) {
+      goReviewFailure = error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  // TODO: remove the old Python fallback once all supported BuildOS checkouts use the Go review CLI.
+  if (await pathExists(path.join(repoRoot, OLD_REVIEW_SCRIPT_RELATIVE_PATH))) return { kind: "python" };
+
+  if (hasGoReviewCommand) {
+    const suffix = goReviewFailure ? `\n${goReviewFailure}` : "";
+    throw new Error(
+      `Found ${GO_REVIEW_COMMENTS_RELATIVE_PATH}, but ${GO_REVIEW_COMMAND} comments is unavailable.${suffix}`,
+    );
+  }
+
+  throw new Error(
+    `This does not look like the BuildOS repository; missing ${GO_REVIEW_COMMENTS_RELATIVE_PATH} and ${OLD_REVIEW_SCRIPT_RELATIVE_PATH}.`,
+  );
+}
+
 async function resolveRepo(pi: ExtensionAPI, ctx: ExtensionContext): Promise<RepoResolution> {
   const rootResult = await pi.exec("git", ["rev-parse", "--show-toplevel"], { cwd: ctx.cwd, timeout: 5_000 });
   if (rootResult.code !== 0) {
@@ -157,12 +206,7 @@ async function resolveRepo(pi: ExtensionAPI, ctx: ExtensionContext): Promise<Rep
   const repoRoot = rootResult.stdout.trim();
   if (!repoRoot) throw new Error("Unable to determine repository root.");
 
-  const scriptPath = path.join(repoRoot, REVIEW_SCRIPT_RELATIVE_PATH);
-  try {
-    await access(scriptPath);
-  } catch {
-    throw new Error(`This does not look like the BuildOS repository; missing ${REVIEW_SCRIPT_RELATIVE_PATH}.`);
-  }
+  const reviewFlow = await selectReviewFlow(pi, repoRoot);
 
   const remoteResult = await pi.exec("git", ["remote", "get-url", "origin"], { cwd: repoRoot, timeout: 5_000 });
   const remoteSlug = remoteResult.code === 0 ? parseGitHubSlug(remoteResult.stdout.trim()) : undefined;
@@ -170,7 +214,7 @@ async function resolveRepo(pi: ExtensionAPI, ctx: ExtensionContext): Promise<Rep
     throw new Error(`This extension is intended for ${EXPECTED_REMOTE}; current origin is ${remoteSlug}.`);
   }
 
-  return { repoRoot, remoteSlug };
+  return { repoRoot, reviewFlow, remoteSlug };
 }
 
 async function getShortHead(pi: ExtensionAPI, repoRoot: string): Promise<string> {
@@ -180,25 +224,45 @@ async function getShortHead(pi: ExtensionAPI, repoRoot: string): Promise<string>
   return result.stdout.trim();
 }
 
-async function runFetch(pi: ExtensionAPI, repoRoot: string, prNumber?: number): Promise<string> {
-  const args = ["run", REVIEW_SCRIPT_RELATIVE_PATH, "fetch"];
-  if (prNumber !== undefined) args.push(String(prNumber));
+async function runReviewCommand(
+  pi: ExtensionAPI,
+  repoRoot: string,
+  reviewFlow: ReviewFlow,
+  operation: "fetch" | "reply",
+  operationArgs: string[],
+  failureMessage: string,
+): Promise<string> {
+  const command = reviewFlow.kind === "go" ? GO_REVIEW_COMMAND : "uv";
+  const args =
+    reviewFlow.kind === "go"
+      ? ["comments", operation, ...operationArgs]
+      : ["run", OLD_REVIEW_SCRIPT_RELATIVE_PATH, operation, ...operationArgs];
 
-  const result = await pi.exec("uv", args, { cwd: repoRoot, timeout: 120_000 });
+  const result = await pi.exec(command, args, { cwd: repoRoot, timeout: 120_000 });
   if (result.code !== 0) {
-    throw new Error(`Failed to fetch review comments.\n${result.stderr || result.stdout}`.trim());
+    throw new Error(`${failureMessage} via ${reviewFlowLabel(reviewFlow)}.\n${result.stderr || result.stdout}`.trim());
   }
 
   const responsePath = firstLine(result.stdout);
-  if (!responsePath) throw new Error("Review comment fetch did not return a response file path.");
+  if (!responsePath) throw new Error(`${failureMessage} did not return a response file path.`);
 
   try {
     await access(responsePath);
   } catch {
-    throw new Error(`Review comment fetch returned an unreadable path: ${responsePath}`);
+    throw new Error(`${failureMessage} returned an unreadable path: ${responsePath}`);
   }
 
   return responsePath;
+}
+
+async function runFetch(
+  pi: ExtensionAPI,
+  repoRoot: string,
+  reviewFlow: ReviewFlow,
+  prNumber?: number,
+): Promise<string> {
+  const args = prNumber === undefined ? [] : [String(prNumber)];
+  return runReviewCommand(pi, repoRoot, reviewFlow, "fetch", args, "Failed to fetch review comments");
 }
 
 async function loadFetchPayload(fetchResponsePath: string): Promise<FetchPayload> {
@@ -213,24 +277,13 @@ async function runReply(
   draftReply: string,
   resolve: boolean,
 ): Promise<string> {
-  const args = ["run", REVIEW_SCRIPT_RELATIVE_PATH, "reply", threadId, "--comment", draftReply];
+  const reviewFlow = state.reviewFlow ?? (await selectReviewFlow(pi, state.repoRoot));
+  state.reviewFlow = reviewFlow;
+
+  const args = [threadId, "--comment", draftReply];
   if (resolve) args.push("--resolve");
 
-  const result = await pi.exec("uv", args, { cwd: state.repoRoot, timeout: 120_000 });
-  if (result.code !== 0) {
-    throw new Error(`Failed to submit review reply.\n${result.stderr || result.stdout}`.trim());
-  }
-
-  const responsePath = firstLine(result.stdout);
-  if (!responsePath) throw new Error("Review reply submission did not return a response file path.");
-
-  try {
-    await access(responsePath);
-  } catch {
-    throw new Error(`Review reply submission returned an unreadable path: ${responsePath}`);
-  }
-
-  return responsePath;
+  return runReviewCommand(pi, state.repoRoot, reviewFlow, "reply", args, "Failed to submit review reply");
 }
 
 function makeCheckpointMarkdown(checkpoint: CheckpointParams): string {
@@ -530,10 +583,10 @@ export default function addressReviewCommentsExtension(pi: ExtensionAPI) {
       }
 
       try {
-        const { repoRoot } = await resolveRepo(pi, ctx);
+        const { repoRoot, reviewFlow } = await resolveRepo(pi, ctx);
         const startCommitShort = await getShortHead(pi, repoRoot);
-        ctx.ui.notify("Fetching review comments...", "info");
-        const fetchResponsePath = await runFetch(pi, repoRoot, parsed.prNumber);
+        ctx.ui.notify(`Fetching review comments via ${reviewFlowLabel(reviewFlow)}...`, "info");
+        const fetchResponsePath = await runFetch(pi, repoRoot, reviewFlow, parsed.prNumber);
         const payload = await loadFetchPayload(fetchResponsePath);
         const threads = payload.review_threads ?? [];
 
@@ -544,6 +597,7 @@ export default function addressReviewCommentsExtension(pi: ExtensionAPI) {
 
         activeWorkflow = {
           repoRoot,
+          reviewFlow,
           fetchResponsePath,
           startCommitShort,
           prNumber: parsed.prNumber ?? payload.pull_request?.number,
@@ -787,12 +841,16 @@ export default function addressReviewCommentsExtension(pi: ExtensionAPI) {
 
     if (!activeWorkflow) return undefined;
 
-    const isReviewOperation = command.includes(REVIEW_SCRIPT_RELATIVE_PATH) && /\b(fetch|reply)\b/.test(command);
+    const isOldPythonReviewOperation =
+      command.includes(OLD_REVIEW_SCRIPT_RELATIVE_PATH) && /\b(fetch|reply)\b/.test(command);
+    const isGoReviewOperation =
+      /(?:^|[\s;&|])review\s+comments\s+(?:fetch|reply)\b/.test(command) ||
+      (command.includes(GO_REVIEW_COMMENTS_RELATIVE_PATH) && /\bcomments\s+(?:fetch|reply)\b/.test(command));
     const isManualGitHubReviewMutation =
       /\bgh\s+api\b/.test(command) &&
       /(addPullRequestReviewThreadReply|resolveReviewThread|reviewThreads)/.test(command);
 
-    if (isReviewOperation || isManualGitHubReviewMutation) {
+    if (isOldPythonReviewOperation || isGoReviewOperation || isManualGitHubReviewMutation) {
       return {
         block: true,
         reason:
