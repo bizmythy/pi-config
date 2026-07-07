@@ -18,5 +18,5 @@
     }
   ],
   "theme": "catppuccin-mocha",
-  "hideThinkingBlock": false
+  "hideThinkingBlock": true
 }
