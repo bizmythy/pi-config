@@ -1,7 +1,7 @@
 {
   "lastChangelogVersion": "0.80.3",
-  "defaultProvider": "openai-codex",
-  "defaultModel": "gpt-5.5",
+  "defaultProvider": "grok-cli",
+  "defaultModel": "grok-4.5",
   "extensions": [],
   "npmCommand": [
     "pi-npm"
@@ -15,7 +15,8 @@
       "source": "npm:pi-subagents",
       "skills": [],
       "prompts": []
-    }
+    },
+    "npm:pi-grok-cli@0.3.2"
   ],
   "theme": "catppuccin-mocha",
   "hideThinkingBlock": true
