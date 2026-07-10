@@ -1,4 +1,13 @@
 {
   "allowBrowserCookies": true,
-  "chromeProfile": "Default"
+  "chromeProfile": "Default",
+  "video": {
+    "enabled": true,
+    "preferredModel": "gemini-2.5-flash",
+    "maxSizeMB": 50
+  },
+  "youtube": {
+    "enabled": true,
+    "preferredModel": "gemini-2.5-flash"
+  }
 }

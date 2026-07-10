@@ -1,5 +1,5 @@
 {
-  "lastChangelogVersion": "0.80.3",
+  "lastChangelogVersion": "0.80.5",
   "defaultProvider": "grok-cli",
   "defaultModel": "grok-4.5",
   "extensions": [],

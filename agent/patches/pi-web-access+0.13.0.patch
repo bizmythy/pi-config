@@ -1,0 +1,171 @@
+diff --git a/node_modules/pi-web-access/gemini-api.ts b/node_modules/pi-web-access/gemini-api.ts
+index 30668c3..1202a39 100644
+--- a/node_modules/pi-web-access/gemini-api.ts
++++ b/node_modules/pi-web-access/gemini-api.ts
+@@ -5,7 +5,7 @@ const DEFAULT_API_HOST = "https://generativelanguage.googleapis.com";
+ const API_VERSION = "v1beta";
+ export const API_BASE = `${DEFAULT_API_HOST}/${API_VERSION}`;
+ const CONFIG_PATH = getWebSearchConfigPath();
+-export const DEFAULT_MODEL = "gemini-3-flash-preview";
++export const DEFAULT_MODEL = "gemini-2.5-flash";
+ 
+ interface GeminiApiConfig {
+ 	geminiApiKey?: unknown;
+diff --git a/node_modules/pi-web-access/video-extract.ts b/node_modules/pi-web-access/video-extract.ts
+index 209b9c9..ca03ef2 100644
+--- a/node_modules/pi-web-access/video-extract.ts
++++ b/node_modules/pi-web-access/video-extract.ts
+@@ -32,11 +32,22 @@ const VIDEO_EXTENSIONS: Record<string, string> = {
+ 	".3gpp": "video/3gpp",
+ };
+ 
++function errorMessage(err: unknown): string {
++	return err instanceof Error ? err.message : String(err);
++}
++
+ function shouldRethrow(err: unknown): boolean {
+-	const message = err instanceof Error ? err.message : String(err);
+-	return message.startsWith("Failed to parse ");
++	return errorMessage(err).startsWith("Failed to parse ");
+ }
+ 
++function addAttemptError(errors: string[], label: string, err: unknown): void {
++	const message = errorMessage(err).replace(/\s+/g, " ").trim();
++	if (message) errors.push(`${label}: ${message}`);
++}
++
++/** Models tried in order when the preferred model is unavailable (e.g. 503 high demand). */
++const VIDEO_MODEL_FALLBACKS = ["gemini-2.5-flash", "gemini-flash-latest"] as const;
++
+ interface VideoFileInfo {
+ 	absolutePath: string;
+ 	mimeType: string;
+@@ -66,7 +77,8 @@ function normalizeMaxSizeMB(value: unknown, fallback: number): number {
+ 
+ const VIDEO_CONFIG_DEFAULTS: VideoConfig = {
+ 	enabled: true,
+-	preferredModel: "gemini-3-flash-preview",
++	// gemini-3-flash-preview is frequently capacity-limited; 2.5-flash is the stable video path.
++	preferredModel: "gemini-2.5-flash",
+ 	maxSizeMB: 50,
+ };
+ 
+@@ -165,9 +177,10 @@ export async function extractVideo(
+ 	const effectiveModel = options?.model ?? config.preferredModel;
+ 	const displayName = basename(info.absolutePath);
+ 	const activityId = activityMonitor.logStart({ type: "fetch", url: `video:${displayName}` });
++	const attemptErrors: string[] = [];
+ 
+-	const result = await tryVideoGeminiApi(info, effectivePrompt, effectiveModel, signal)
+-		?? await tryVideoGeminiWeb(info, effectivePrompt, effectiveModel, signal);
++	const result = await tryVideoGeminiApi(info, effectivePrompt, effectiveModel, signal, attemptErrors)
++		?? await tryVideoGeminiWeb(info, effectivePrompt, effectiveModel, signal, attemptErrors);
+ 
+ 	if (result) {
+ 		const thumbnail = await extractVideoFrame(info.absolutePath);
+@@ -183,8 +196,11 @@ export async function extractVideo(
+ 		return null;
+ 	}
+ 
+-	activityMonitor.logError(activityId, "all video extraction paths failed");
+-	return null;
++	const error = attemptErrors.length > 0
++		? ["Could not analyze local video.", "", ...attemptErrors.map((message) => `- ${message}`)].join("\n")
++		: `Video analysis requires Gemini access. Either:\n  1. Sign into gemini.google.com in Chrome (free, uses cookies)\n  2. Set GEMINI_API_KEY in ${CONFIG_PATH}`;
++	activityMonitor.logError(activityId, error);
++	return { url: info.absolutePath, title: "", content: "", error };
+ }
+ 
+ function mapFfprobeError(err: unknown): string {
+@@ -228,6 +244,7 @@ async function tryVideoGeminiWeb(
+ 	prompt: string,
+ 	model: string,
+ 	signal?: AbortSignal,
++	attemptErrors: string[] = [],
+ ): Promise<ExtractedContent | null> {
+ 	try {
+ 		const cookies = await isGeminiWebAvailable();
+@@ -249,15 +266,22 @@ async function tryVideoGeminiWeb(
+ 		};
+ 	} catch (err) {
+ 		if (shouldRethrow(err)) throw err;
++		if (!signal?.aborted) addAttemptError(attemptErrors, "Gemini Web", err);
+ 		return null;
+ 	}
+ }
+ 
++function videoModelsToTry(preferred: string): string[] {
++	const models = [preferred, ...VIDEO_MODEL_FALLBACKS];
++	return [...new Set(models.map((m) => m.trim()).filter(Boolean))];
++}
++
+ async function tryVideoGeminiApi(
+ 	info: VideoFileInfo,
+ 	prompt: string,
+ 	model: string,
+ 	signal?: AbortSignal,
++	attemptErrors: string[] = [],
+ ): Promise<ExtractedContent | null> {
+ 	const apiKey = getApiKey();
+ 	if (!apiKey) return null;
+@@ -270,21 +294,35 @@ async function tryVideoGeminiApi(
+ 
+ 		await pollFileState(fileName, apiKey, signal, 120000);
+ 
+-		const text = await queryGeminiApiWithVideo(prompt, uploaded.uri, {
+-			model,
+-			mimeType: info.mimeType,
+-			signal,
+-			timeoutMs: 120000,
+-		});
++		let lastErr: unknown;
++		for (const candidate of videoModelsToTry(model)) {
++			if (signal?.aborted) return null;
++			try {
++				const text = await queryGeminiApiWithVideo(prompt, uploaded.uri, {
++					model: candidate,
++					mimeType: info.mimeType,
++					signal,
++					timeoutMs: 120000,
++				});
++
++				return {
++					url: info.absolutePath,
++					title: extractVideoTitle(text, info.absolutePath),
++					content: text,
++					error: null,
++				};
++			} catch (err) {
++				lastErr = err;
++				if (shouldRethrow(err)) throw err;
++				if (!signal?.aborted) addAttemptError(attemptErrors, `Gemini API (${candidate})`, err);
++			}
++		}
+ 
+-		return {
+-			url: info.absolutePath,
+-			title: extractVideoTitle(text, info.absolutePath),
+-			content: text,
+-			error: null,
+-		};
++		if (lastErr && shouldRethrow(lastErr)) throw lastErr;
++		return null;
+ 	} catch (err) {
+ 		if (shouldRethrow(err)) throw err;
++		if (!signal?.aborted) addAttemptError(attemptErrors, "Gemini API", err);
+ 		return null;
+ 	} finally {
+ 		if (fileName) deleteGeminiFile(fileName, apiKey);
+diff --git a/node_modules/pi-web-access/youtube-extract.ts b/node_modules/pi-web-access/youtube-extract.ts
+index c9117a2..53ba416 100644
+--- a/node_modules/pi-web-access/youtube-extract.ts
++++ b/node_modules/pi-web-access/youtube-extract.ts
+@@ -48,7 +48,7 @@ function normalizeEnabled(value: unknown, fallback: boolean): boolean {
+ 	return typeof value === "boolean" ? value : fallback;
+ }
+ 
+-const defaults: YouTubeConfig = { enabled: true, preferredModel: "gemini-3-flash-preview" };
++const defaults: YouTubeConfig = { enabled: true, preferredModel: "gemini-2.5-flash" };
+ let cachedConfig: YouTubeConfig | null = null;
+ 
+ function loadYouTubeConfig(): YouTubeConfig {
