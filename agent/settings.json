@@ -1,7 +1,7 @@
 {
   "lastChangelogVersion": "0.80.5",
-  "defaultProvider": "grok-cli",
-  "defaultModel": "grok-4.5",
+  "defaultProvider": "openai-codex",
+  "defaultModel": "gpt-5.6-luna",
   "extensions": [],
   "npmCommand": [
     "pi-npm"
