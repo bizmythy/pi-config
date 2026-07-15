@@ -1,13 +1,12 @@
 ---
+name: pr-ticket-bootstrap
 description: "Ensure the current git branch has a linked Linear ticket and GitHub PR."
-argument-hint: "[--open|-o]"
+disable-model-invocation: true
 ---
 
 # PR Ticket Bootstrap
 
 Ensure the current branch has the expected GitHub and Linear bookkeeping before review.
-
-Additional user details: $ARGUMENTS
 
 ## Workflow
 
@@ -53,7 +52,7 @@ Additional user details: $ARGUMENTS
 ## Creation and Updates
 
 - If no valid ticket exists, create one concise Linear issue.
-- If no PR exists, create a draft PR using the ticket key in the title unless the user passed `--open` or `-o` in the prompt arguments.
+- If no PR exists, create a draft PR using the ticket key in the title unless the user passed `--open` or `-o` in the skill invocation.
 - If the user passed `--open` or `-o` and no PR exists, create the PR as ready for review instead of draft.
 - If a PR already exists and its title is clearly stale or missing the ticket prefix, update it when the correct title is clear from the diff.
 - If a PR already exists and its body is empty or obviously template-placeholder content, update it using the repository template.
@@ -61,7 +60,7 @@ Additional user details: $ARGUMENTS
 ## Draft/Open Status
 
 - Treat PRs as draft by default.
-- Only create or mark a PR ready for review when the prompt arguments include `--open` or `-o`.
+- Only create or mark a PR ready for review when the skill invocation includes `--open` or `-o`.
 - If `--open` or `-o` is present and the PR already exists as a draft, mark it ready for review without asking again.
 - If `--open` or `-o` is absent and the PR already exists as ready for review, leave it ready and say so instead of trying to change it back to draft.
 - Do not ask whether to set the PR ready for review.
