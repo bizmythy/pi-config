@@ -1,10 +1,10 @@
 ---
-name: pr-ticket-bootstrap
-description: "Ensure the current git branch has a linked Linear ticket and GitHub PR."
+name: pr-issue-bootstrap
+description: "Ensure the current git branch has a linked Linear issue and GitHub PR."
 disable-model-invocation: true
 ---
 
-# PR Ticket Bootstrap
+# PR Issue Bootstrap
 
 Ensure the current branch has the expected GitHub and Linear bookkeeping before review.
 
