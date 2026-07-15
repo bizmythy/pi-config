@@ -7,6 +7,7 @@ function tokenizeShell(command: string): ShellToken[] {
   const tokens: ShellToken[] = [];
   let current = "";
   let quote: "'" | '"' | undefined;
+  let commandSubstitutionDepth = 0;
   let escaped = false;
 
   const flushWord = () => {
@@ -34,6 +35,21 @@ function tokenizeShell(command: string): ShellToken[] {
       } else {
         current += char;
       }
+      continue;
+    }
+
+    // Keep $(...) together so assignments such as TMP_DIR=$(mktemp -d) can
+    // be evaluated as a single shell word.
+    if (commandSubstitutionDepth > 0) {
+      current += char;
+      if (char === "(") commandSubstitutionDepth++;
+      if (char === ")") commandSubstitutionDepth--;
+      continue;
+    }
+
+    if (char === "(" && current.endsWith("$")) {
+      current += char;
+      commandSubstitutionDepth = 1;
       continue;
     }
 
@@ -71,54 +87,102 @@ function isRecursiveRmFlag(arg: string): boolean {
   return arg === "--recursive" || (/^-[^-]/.test(arg) && /[rR]/.test(arg));
 }
 
-function getRecursiveRmTargets(command: string): string[][] {
-  const tokens = tokenizeShell(command);
-  const rmTargets: string[][] = [];
+type ShellValue = { kind: "safe-path"; value: string } | { kind: "temporary" } | { kind: "unknown" };
 
-  for (let i = 0; i < tokens.length; i++) {
-    const token = tokens[i];
-    if (token.type !== "word" || !isRmCommand(token.value)) continue;
-
-    const args: string[] = [];
-    for (let j = i + 1; j < tokens.length && tokens[j]?.type === "word"; j++) {
-      args.push(tokens[j].value);
-    }
-
-    if (!args.some(isRecursiveRmFlag)) continue;
-
-    let afterOptions = false;
-    const targets: string[] = [];
-    for (const arg of args) {
-      if (!afterOptions && arg === "--") {
-        afterOptions = true;
-        continue;
-      }
-
-      if (!afterOptions && arg.startsWith("-")) continue;
-      targets.push(arg);
-    }
-
-    rmTargets.push(targets);
-  }
-
-  return rmTargets;
-}
-
-function isLiteralPathBelowTmp(target: string, cwd: string): boolean {
-  if (target.length === 0) return false;
-
-  // Shell expansions can resolve to paths outside /tmp, so keep them guarded.
-  if (/[`$]/.test(target) || target.startsWith("~")) return false;
+function isPathBelowTmp(target: string, cwd: string): boolean {
+  if (target.length === 0 || /[`$~]/.test(target)) return false;
 
   const absoluteTarget = path.isAbsolute(target) ? path.normalize(target) : path.resolve(cwd, target);
   return absoluteTarget !== "/tmp" && absoluteTarget !== "/tmp/" && absoluteTarget.startsWith("/tmp/");
 }
 
+function isTemporaryVariableName(name: string): boolean {
+  // This is intentionally a little permissive: agents commonly call these
+  // TMP_DIR, temp_path, or scratch_dir. The value is still not trusted when
+  // it is a literal path outside /tmp.
+  return /(?:^|_)(?:tmp|temp|temporary|scratch)(?:dir|path)?(?:_|$)/i.test(name);
+}
+
+function variableName(word: string): string | undefined {
+  const match = /^(?:\$|\$\{)([A-Za-z_][A-Za-z0-9_]*)(?:})?$/.exec(word);
+  return match?.[1];
+}
+
+function resolveShellValue(word: string, variables: Map<string, ShellValue>, cwd: string): ShellValue {
+  if (isPathBelowTmp(word, cwd)) return { kind: "safe-path", value: word };
+  if (/^\$\(\s*mktemp\s+-d(?:\s+[^)]*)?\s*\)$/.test(word)) return { kind: "temporary" };
+
+  const name = variableName(word);
+  if (name) return variables.get(name) ?? (isTemporaryVariableName(name) ? { kind: "temporary" } : { kind: "unknown" });
+
+  const prefix = /^(?:\$([A-Za-z_][A-Za-z0-9_]*)|\$\{([A-Za-z_][A-Za-z0-9_]*)})(\/.*)$/.exec(word);
+  if (prefix) {
+    const value = variables.get(prefix[1] ?? prefix[2]);
+    if (value?.kind === "temporary") return { kind: "temporary" };
+    if (value?.kind === "safe-path" && !prefix[3].includes("..")) {
+      return { kind: "safe-path", value: path.join(value.value, prefix[3]) };
+    }
+  }
+
+  return { kind: "unknown" };
+}
+
+function hasSafeRecursiveRmTarget(target: string, variables: Map<string, ShellValue>, cwd: string): boolean {
+  const value = resolveShellValue(target, variables, cwd);
+  return value.kind === "temporary" || (value.kind === "safe-path" && isPathBelowTmp(value.value, cwd));
+}
+
 function hasUnsafeRecursiveRm(command: string, cwd: string): boolean {
-  return getRecursiveRmTargets(command).some((targets) => {
-    if (targets.length === 0) return true;
-    return !targets.every((target) => isLiteralPathBelowTmp(target, cwd));
-  });
+  const tokens = tokenizeShell(command);
+  const variables = new Map<string, ShellValue>();
+  let atCommandStart = true;
+
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i];
+    if (token.type === "control") {
+      atCommandStart = true;
+      continue;
+    }
+
+    // Track assignments before a command (including `TMP_DIR=... rm -rf ...`).
+    if (atCommandStart) {
+      const assignment = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(token.value);
+      if (assignment) {
+        variables.set(assignment[1], resolveShellValue(assignment[2], variables, cwd));
+        continue;
+      }
+      if (token.value === "export") {
+        const next = tokens[i + 1];
+        const assignment = next?.type === "word" ? /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(next.value) : undefined;
+        if (assignment) {
+          variables.set(assignment[1], resolveShellValue(assignment[2], variables, cwd));
+          i++;
+          continue;
+        }
+      }
+      atCommandStart = false;
+    }
+
+    if (!isRmCommand(token.value)) continue;
+    const args: string[] = [];
+    for (let j = i + 1; j < tokens.length && tokens[j]?.type === "word"; j++) args.push(tokens[j].value);
+    if (!args.some(isRecursiveRmFlag)) continue;
+
+    let afterOptions = false;
+    const targets = args.filter((arg) => {
+      if (!afterOptions && arg === "--") {
+        afterOptions = true;
+        return false;
+      }
+      return afterOptions || !arg.startsWith("-");
+    });
+
+    // No target means rm's behavior depends on the shell/environment.
+    if (targets.length === 0 || !targets.every((target) => hasSafeRecursiveRmTarget(target, variables, cwd)))
+      return true;
+  }
+
+  return false;
 }
 
 /**
