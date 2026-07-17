@@ -1,42 +1,37 @@
 # /// script
 # requires-python = ">=3.11"
 # dependencies = [
-#   "browser-cookie3>=0.20,<1",
 #   "click>=8.1,<9",
-#   "requests>=2.32,<3",
+#   "websocket-client>=1.8,<2",
 # ]
 # ///
 """Create or update a GitHub pull request with reliably embedded media."""
 
 from __future__ import annotations
 
-import mimetypes
+import json
 import os
+import platform
 import re
+import shutil
 import subprocess
 import tempfile
+import urllib.parse
+import urllib.request
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Sequence
 
 import click
-import requests
+import websocket
 
-GITHUB = "https://github.com"
-USER_AGENT = "pi-github-create-pr-with-media/1.0"
-UPLOAD_TOKEN_RE = re.compile(r'"uploadToken":"([^"]+)"')
 IMAGE_EXTENSIONS = {".gif", ".jpeg", ".jpg", ".png", ".svg"}
 VIDEO_EXTENSIONS = {".mov", ".mp4", ".webm"}
-CONTENT_TYPES = {
-    ".gif": "image/gif",
-    ".jpeg": "image/jpeg",
-    ".jpg": "image/jpeg",
-    ".mov": "video/quicktime",
-    ".mp4": "video/mp4",
-    ".png": "image/png",
-    ".svg": "image/svg+xml",
-    ".webm": "video/webm",
-}
+ATTACHMENT_URL_RE = re.compile(
+    r"https://github\.com/user-attachments/(?:assets|files)/[^\s)]+"
+)
+ASSETS_RELEASE_TAG = "_pi-pr-description-assets"
 
 
 @dataclass(frozen=True)
@@ -50,19 +45,22 @@ def fail(message: str) -> click.ClickException:
     return click.ClickException(message)
 
 
-def run(command: Sequence[str], *, stdin: str | None = None) -> str:
+def run(command: Sequence[str], *, env: dict[str, str] | None = None) -> str:
     try:
         result = subprocess.run(
             command,
-            input=stdin,
             text=True,
             check=True,
             stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=env,
         )
     except FileNotFoundError as error:
         raise fail(f"required command not found: {command[0]}") from error
     except subprocess.CalledProcessError as error:
-        raise fail(f"command failed ({error.returncode}): {' '.join(command)}") from error
+        detail = (error.stderr or error.stdout or "").strip()
+        suffix = f": {detail}" if detail else ""
+        raise fail(f"command failed ({error.returncode}): {' '.join(command)}{suffix}") from error
     return result.stdout.strip()
 
 
@@ -94,7 +92,7 @@ def option_value(arguments: Sequence[str], long: str, short: str) -> str | None:
     index = 0
     while index < len(arguments):
         argument = arguments[index]
-        if argument == long or argument == short:
+        if argument in {long, short}:
             if index + 1 >= len(arguments):
                 raise fail(f"{argument} requires a value")
             value = arguments[index + 1]
@@ -103,7 +101,7 @@ def option_value(arguments: Sequence[str], long: str, short: str) -> str | None:
         if argument.startswith(f"{long}="):
             value = argument.split("=", 1)[1]
         elif argument.startswith(short) and argument != short and len(short) == 2:
-            value = argument[len(short) :]
+            value = argument[len(short) :].removeprefix("=")
         index += 1
     return value
 
@@ -122,6 +120,7 @@ def resolve_repo(arguments: Sequence[str], pr: str | None = None) -> str:
             repo = match.group(1)
     if repo is None:
         repo = run(["gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"])
+
     parts = repo.removeprefix("https://github.com/").rstrip("/").split("/")
     if len(parts) > 2 and "." in parts[-3]:
         parts = parts[-2:]
@@ -130,135 +129,195 @@ def resolve_repo(arguments: Sequence[str], pr: str | None = None) -> str:
     return "/".join(parts)
 
 
-def session_candidates() -> list[str]:
-    explicit = os.environ.get("GH_SESSION_TOKEN")
-    if explicit:
-        return [explicit.strip()]
-
-    try:
-        import browser_cookie3
-
-        cookies = browser_cookie3.load(domain_name="github.com")
-    except Exception as error:
-        raise fail(
-            "could not read GitHub browser cookies; log in to github.com in a supported "
-            "browser or set GH_SESSION_TOKEN"
-        ) from error
-
-    candidates: list[str] = []
-    for cookie in cookies:
-        if cookie.name == "user_session" and cookie.value not in candidates:
-            candidates.append(cookie.value)
-    if not candidates:
-        raise fail(
-            "no github.com user_session cookie found; log in in a supported browser or "
-            "set GH_SESSION_TOKEN"
-        )
-    return candidates
-
-
-def authenticated_session(session_token: str) -> requests.Session:
-    session = requests.Session()
-    session.headers["User-Agent"] = USER_AGENT
-    session.cookies.set("user_session", session_token, domain="github.com", path="/")
-    # GitHub's CSRF check requires this host-only twin of user_session.
-    session.cookies.set("__Host-user_session_same_site", session_token, path="/")
-    return session
-
-
-def find_upload_session(repo: str) -> tuple[requests.Session, str]:
-    owner = repo.split("/", 1)[0]
-    for token in session_candidates():
-        session = authenticated_session(token)
-        response = session.get(f"{GITHUB}/{repo}", timeout=30)
-        match = UPLOAD_TOKEN_RE.search(response.text) if response.ok else None
-        if match:
-            return session, match.group(1)
-        if response.ok and re.search(rf"/orgs/{re.escape(owner)}/sso\b", response.text, re.I):
-            raise fail(
-                f"{owner} requires SAML SSO authorization; visit "
-                f"https://github.com/orgs/{owner}/sso in the same browser, then retry"
-            )
-    raise fail(f"no browser session with write access to {repo} supplied an upload token")
-
-
-def checked_response(response: requests.Response, expected: int, step: str) -> requests.Response:
-    if response.status_code != expected:
-        excerpt = response.text.replace("\n", " ")[:300]
-        raise fail(f"{step} failed: expected HTTP {expected}, got {response.status_code}: {excerpt}")
-    return response
-
-
-def upload_media(
-    session: requests.Session,
-    upload_token: str,
-    repo: str,
-    repository_id: int,
-    media: MediaSpec,
-) -> str:
-    content_type = CONTENT_TYPES.get(media.path.suffix.lower())
-    if content_type is None:
-        guessed, _ = mimetypes.guess_type(media.path.name)
-        content_type = guessed or "application/octet-stream"
-
-    headers = {
-        "Accept": "application/json",
-        "Origin": GITHUB,
-        "Referer": f"{GITHUB}/{repo}",
-        "X-Requested-With": "XMLHttpRequest",
-    }
-    policy_response = session.post(
-        f"{GITHUB}/upload/policies/assets",
-        data={
-            "name": media.path.name,
-            "size": str(media.path.stat().st_size),
-            "content_type": content_type,
-            "authenticity_token": upload_token,
-            "repository_id": str(repository_id),
-        },
-        headers=headers,
-        timeout=30,
-    )
-    policy = checked_response(policy_response, 201, f"requesting upload policy for {media.path.name}").json()
-
-    with media.path.open("rb") as file:
-        s3_response = requests.post(
-            policy["upload_url"],
-            data=policy["form"],
-            files={"file": (media.path.name, file, content_type)},
-            headers={"Origin": GITHUB},
-            timeout=120,
-        )
-    checked_response(s3_response, 204, f"uploading {media.path.name} to storage")
-
-    finalize_response = session.put(
-        f"{GITHUB}{policy['asset_upload_url']}",
-        data={"authenticity_token": policy["asset_upload_authenticity_token"]},
-        headers=headers,
-        timeout=30,
-    )
-    result = checked_response(finalize_response, 200, f"finalizing {media.path.name}").json()
-    href = result.get("href")
-    if not isinstance(href, str) or not href.startswith(f"{GITHUB}/user-attachments/"):
-        raise fail(f"GitHub returned an invalid attachment URL for {media.path.name}: {href!r}")
-    return href
-
-
-def replace_marker(body: str, media: MediaSpec, href: str) -> str:
+def validate_marker(body: str, media: MediaSpec) -> None:
     count = body.count(media.marker)
     if count != 1:
         raise fail(f"marker {media.marker!r} must occur exactly once in the PR body (found {count})")
+    if media.kind == "video" and not re.search(
+        rf"(?m)^[ \t]*{re.escape(media.marker)}[ \t]*$", body
+    ):
+        raise fail(
+            f"video marker {media.marker!r} must be alone on its line so GitHub renders a player"
+        )
 
+
+def replace_marker(body: str, media: MediaSpec, href: str) -> str:
     if media.kind == "video":
         line_pattern = re.compile(rf"(?m)^[ \t]*{re.escape(media.marker)}[ \t]*$")
-        if not line_pattern.search(body):
-            raise fail(
-                f"video marker {media.marker!r} must be alone on its line so GitHub renders a player"
-            )
         return line_pattern.sub(f"\n{href}\n", body, count=1)
 
     alt = media.path.name.replace("\\", "\\\\").replace("]", "\\]")
     return body.replace(media.marker, f"![{alt}]({href})", 1)
+
+
+def gh_image_command() -> list[str]:
+    try:
+        check = subprocess.run(
+            ["gh", "image", "--version"],
+            text=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except FileNotFoundError as error:
+        raise fail("required command not found: gh") from error
+    if check.returncode == 0:
+        return ["gh", "image"]
+
+    system = platform.system().lower()
+    machine = platform.machine().lower()
+    architecture = {
+        "x86_64": "amd64",
+        "amd64": "amd64",
+        "aarch64": "arm64",
+        "arm64": "arm64",
+    }.get(machine)
+    os_name = {"darwin": "darwin", "linux": "linux", "windows": "windows"}.get(system)
+    if not os_name or not architecture:
+        raise fail(f"gh-image has no prebuilt binary for {system}/{machine}")
+
+    suffix = ".exe" if os_name == "windows" else ""
+    asset = f"{os_name}-{architecture}{suffix}"
+    tag = run(
+        [
+            "gh",
+            "release",
+            "view",
+            "--repo",
+            "drogers0/gh-image",
+            "--json",
+            "tagName",
+            "--jq",
+            ".tagName",
+        ]
+    )
+    cache_root = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
+    binary = cache_root / "pi" / "gh-image" / tag / asset
+    if not binary.is_file():
+        click.echo(f"Downloading drogers0/gh-image {tag}...", err=True)
+        binary.parent.mkdir(parents=True, exist_ok=True)
+        run(
+            [
+                "gh",
+                "release",
+                "download",
+                tag,
+                "--repo",
+                "drogers0/gh-image",
+                "--pattern",
+                asset,
+                "--output",
+                str(binary),
+                "--clobber",
+            ]
+        )
+        binary.chmod(0o755)
+    run([str(binary), "--version"])
+    return [str(binary)]
+
+
+def cdp_session_token() -> str | None:
+    """Read the active GitHub web session from a running CDP-enabled Chromium."""
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:9222/json/version", timeout=2) as response:
+            websocket_url = json.load(response)["webSocketDebuggerUrl"]
+        connection = websocket.create_connection(
+            websocket_url,
+            timeout=5,
+            suppress_origin=True,
+        )
+        try:
+            connection.send(json.dumps({"id": 1, "method": "Storage.getCookies"}))
+            while True:
+                message = json.loads(connection.recv())
+                if message.get("id") == 1:
+                    break
+        finally:
+            connection.close()
+    except Exception:
+        return None
+
+    cookies = message.get("result", {}).get("cookies", [])
+    for cookie in cookies:
+        if (
+            cookie.get("name") == "user_session"
+            and cookie.get("value")
+            and cookie.get("domain", "").lstrip(".") == "github.com"
+        ):
+            return str(cookie["value"])
+    return None
+
+
+def ensure_assets_release(repo: str) -> None:
+    exists = subprocess.run(
+        ["gh", "release", "view", ASSETS_RELEASE_TAG, "--repo", repo],
+        text=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    if exists.returncode == 0:
+        return
+
+    run(
+        [
+            "gh",
+            "release",
+            "create",
+            ASSETS_RELEASE_TAG,
+            "--repo",
+            repo,
+            "--title",
+            "PR description assets",
+            "--notes",
+            "Assets embedded in pull request descriptions. Do not delete this release or its assets.",
+            "--prerelease",
+        ]
+    )
+
+
+def upload_release_asset(repo: str, media: MediaSpec) -> str:
+    """Token-authenticated fallback using GitHub's supported release API."""
+    ensure_assets_release(repo)
+    asset_name = f"{uuid.uuid4()}-{media.path.name}"
+    with tempfile.TemporaryDirectory() as directory:
+        upload_path = Path(directory) / asset_name
+        shutil.copyfile(media.path, upload_path)
+        run(
+            [
+                "gh",
+                "release",
+                "upload",
+                ASSETS_RELEASE_TAG,
+                str(upload_path),
+                "--repo",
+                repo,
+            ]
+        )
+    encoded_name = urllib.parse.quote(asset_name)
+    return f"https://github.com/{repo}/releases/download/{ASSETS_RELEASE_TAG}/{encoded_name}"
+
+
+def upload_media(command: Sequence[str] | None, repo: str, media: MediaSpec) -> str:
+    if command is None:
+        return upload_release_asset(repo, media)
+
+    env = os.environ.copy()
+    if not env.get("GH_SESSION_TOKEN"):
+        token = cdp_session_token()
+        if token:
+            env["GH_SESSION_TOKEN"] = token
+    try:
+        output = run([*command, "--repo", repo, str(media.path)], env=env)
+    except click.ClickException:
+        click.echo(
+            "User-attachment upload unavailable; using a release asset via active gh authentication.",
+            err=True,
+        )
+        return upload_release_asset(repo, media)
+
+    match = ATTACHMENT_URL_RE.search(output)
+    if not match:
+        raise fail(f"gh image returned no GitHub user-attachment URL for {media.path.name}: {output!r}")
+    return match.group(0)
 
 
 @click.command(
@@ -321,14 +380,17 @@ def main(
       uv run pr_description.py --pr 123 -F /tmp/pr.md \\
         --image '{{after}}=after.png' --repo owner/repo
 
-    Image markers become Markdown image embeds. Video markers become bare user-attachment URLs
-    on their own lines, which GitHub renders as video players. Supported images: PNG, GIF, JPEG,
-    and SVG (10 MB maximum). Supported videos: MP4, MOV, and WEBM (100 MB maximum; free-plan
-    repositories may impose 10 MB). H.264 video is the most browser-compatible.
+    Images use Markdown image embeds. Videos use bare user-attachment URLs on their own lines,
+    which GitHub renders as players. The script first uses drogers0/gh-image's user-attachment
+    flow. If no GitHub web session is available, it automatically falls back to the repository's
+    `_pi-pr-description-assets` prerelease, uploaded through the active `gh` credential. GitHub
+    renders bare release video URLs as inline players. The installed `gh image` extension is used
+    when available; otherwise its release binary is downloaded to the user cache.
 
-    Uploads use the logged-in GitHub session from a local browser and require repository write
-    access. Set GH_SESSION_TOKEN only when browser cookies are unavailable. The `gh` CLI must also
-    be installed and authenticated. Supplying --repo is recommended outside the target checkout.
+    Supported images: PNG, GIF, JPEG, and SVG (10 MB maximum). Supported videos: MP4, MOV, and
+    WEBM (100 MB maximum; free-plan repositories may impose 10 MB). H.264 is the most compatible
+    video codec. The `gh` CLI must be installed and authenticated. Supplying --repo is recommended
+    outside the target checkout.
     """
     media = [
         *(parse_media(value, "image") for value in images),
@@ -340,18 +402,22 @@ def main(
 
     reject_body_text(gh_arguments)
     body = body_file.read_text(encoding="utf-8")
+    for item in media:
+        validate_marker(body, item)
+
     if media:
         repo = resolve_repo(gh_arguments, pr)
-        repository_id_text = run(["gh", "api", f"repos/{repo}", "--jq", ".id"])
         try:
-            repository_id = int(repository_id_text)
-        except ValueError as error:
-            raise fail(f"GitHub returned an invalid repository id: {repository_id_text!r}") from error
-
-        session, upload_token = find_upload_session(repo)
+            image_command = gh_image_command()
+        except click.ClickException:
+            image_command = None
+            click.echo(
+                "gh-image unavailable; using release assets via active gh authentication.",
+                err=True,
+            )
         for item in media:
             click.echo(f"Uploading {item.path.name}...", err=True)
-            href = upload_media(session, upload_token, repo, repository_id, item)
+            href = upload_media(image_command, repo, item)
             body = replace_marker(body, item, href)
 
     with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".md") as rendered_body_file:
