@@ -9,6 +9,8 @@ Use the `gh` CLI to interact with GitHub. Always specify `--repo owner/repo` whe
 
 ## Pull Requests
 
+**Always** use [`scripts/pr_description.py`](scripts/pr_description.py) to create or update a PR description. Run `uv run ~/.pi/agent/skills/github/scripts/pr_description.py --help` for usage.
+
 Check CI status on a PR:
 ```bash
 gh pr checks 55 --repo owner/repo

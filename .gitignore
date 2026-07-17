@@ -13,6 +13,10 @@ exa-usage.json
 .env.*
 *.log
 
+# Python bytecode caches.
+__pycache__/
+*.py[cod]
+
 # Pi package install/cache directories.
 npm/*
 !npm/package.json
