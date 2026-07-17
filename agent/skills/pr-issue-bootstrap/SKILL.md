@@ -51,6 +51,7 @@ Ensure the current branch has the expected GitHub and Linear bookkeeping before 
 
 ## Creation and Updates
 
+- **Always** use [`../github/scripts/pr_description.py`](../github/scripts/pr_description.py) to create or update a PR description. Run `uv run ~/.pi/agent/skills/github/scripts/pr_description.py --help` for usage.
 - If no valid ticket exists, create one concise Linear issue.
 - If no PR exists, create a draft PR using the ticket key in the title unless the user passed `--open` or `-o` in the skill invocation.
 - If the user passed `--open` or `-o` and no PR exists, create the PR as ready for review instead of draft.
