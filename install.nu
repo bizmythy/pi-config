@@ -123,6 +123,8 @@ def main [
   let required_local_packages = [
     ($npm_dir | path join "node_modules" "pi-vim"),
     ($agent_dir | path join "node_modules" "qrcode"),
+    ($agent_dir | path join "node_modules" "remark-parse"),
+    ($agent_dir | path join "node_modules" "unified"),
     ($agent_dir | path join "node_modules" "ws"),
   ]
 

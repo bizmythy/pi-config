@@ -1,3 +1,7 @@
+import type { Root } from "mdast";
+import remarkParse from "remark-parse";
+import { unified } from "unified";
+
 export interface TuicrComment {
   id: string;
   ordinal: number;
@@ -17,12 +21,10 @@ export interface TuicrReview {
   comments: TuicrComment[];
 }
 
-interface PendingComment {
-  ordinal: number;
-  firstLine: string;
-  continuationIndent: number;
-  continuation: string[];
-}
+type MarkdownNode =
+  | Root
+  | Root["children"][number]
+  | { type: string; value?: string; alt?: string; children?: MarkdownNode[] };
 
 function parseLocation(location: string): Pick<TuicrComment, "path" | "startLine" | "endLine" | "side"> {
   const range = location.match(/^(.*):(~?\d+)(?:-(~?\d+))?$/);
@@ -42,21 +44,83 @@ function parseLocation(location: string): Pick<TuicrComment, "path" | "startLine
   };
 }
 
-function finishComment(pending: PendingComment, index: number): TuicrComment | undefined {
-  const header = pending.firstLine.match(/^(?:\*\*\[([^\]]+)]\*\*\s*)?`([^`]+)`(.*)$/);
-  if (!header) return undefined;
+function inlineText(node: MarkdownNode): string {
+  if (node.type === "text" || node.type === "inlineCode" || node.type === "code" || node.type === "html") {
+    return "value" in node ? (node.value ?? "") : "";
+  }
+  if (node.type === "break") return "\n";
+  if (node.type === "image") return "alt" in node ? (node.alt ?? "") : "";
+  return "children" in node && node.children ? node.children.map(inlineText).join("") : "";
+}
 
-  const type = header[1]?.trim() || undefined;
-  const location = header[2].trim();
-  const suffix = header[3].trim();
-  const separator = suffix.match(/^(.*?)\s+-\s+([\s\S]*)$/);
+function blockText(node: MarkdownNode): string {
+  if (node.type === "paragraph" || node.type === "heading") return inlineText(node);
+  if (node.type === "code" || node.type === "html") return "value" in node ? (node.value ?? "") : "";
+  if (!("children" in node) || !node.children) return inlineText(node);
+
+  if (node.type === "list") {
+    const list = node as MarkdownNode & { ordered?: boolean; start?: number };
+    return node.children
+      .map((item, index) => {
+        const marker = list.ordered ? `${(list.start ?? 1) + index}. ` : "- ";
+        const text = blockText(item);
+        return marker + text.replaceAll("\n", `\n${" ".repeat(marker.length)}`);
+      })
+      .join("\n");
+  }
+
+  if (node.type === "blockquote") {
+    return node.children
+      .map(blockText)
+      .join("\n\n")
+      .split("\n")
+      .map((line) => `> ${line}`)
+      .join("\n");
+  }
+
+  const separator = node.type === "listItem" || node.type === "root" ? "\n\n" : "";
+  return node.children.map(blockText).filter(Boolean).join(separator);
+}
+
+function parseComment(item: MarkdownNode, ordinal: number, index: number): TuicrComment | undefined {
+  if (!("children" in item) || !item.children) return undefined;
+  const firstParagraphIndex = item.children.findIndex((child) => child.type === "paragraph");
+  if (firstParagraphIndex < 0) return undefined;
+
+  const paragraph = item.children[firstParagraphIndex];
+  if (!("children" in paragraph) || !paragraph.children) return undefined;
+  const locationIndex = paragraph.children.findIndex((child) => child.type === "inlineCode");
+  if (locationIndex < 0) return undefined;
+
+  const locationNode = paragraph.children[locationIndex];
+  const location = inlineText(locationNode).trim();
+  if (!location) return undefined;
+
+  const prefixNodes = paragraph.children.slice(0, locationIndex);
+  const typeNode = prefixNodes.find((node) => node.type === "strong");
+  const typeMatch = typeNode
+    ? inlineText(typeNode)
+        .trim()
+        .match(/^\[([^\]]+)]$/)
+    : undefined;
+  const type = typeMatch?.[1].trim() || undefined;
+  const suffix = paragraph.children
+    .slice(locationIndex + 1)
+    .map(inlineText)
+    .join("")
+    .trim();
+  const separator = suffix.match(/^([\s\S]*?)\s+-\s+([\s\S]*)$/);
   const context = separator?.[1].trim() || undefined;
-  const firstBodyLine = separator?.[2] ?? suffix.replace(/^-\s*/, "");
-  const body = [firstBodyLine, ...pending.continuation].join("\n").trimEnd();
+  const firstBody = separator?.[2] ?? suffix.replace(/^-\s*/, "");
+  const remainingBlocks = item.children
+    .slice(firstParagraphIndex + 1)
+    .map(blockText)
+    .filter((text) => text.length > 0);
+  const body = [firstBody, ...remainingBlocks].join("\n\n").trimEnd();
 
   return {
     id: `comment-${index + 1}`,
-    ordinal: pending.ordinal,
+    ordinal,
     type,
     location,
     ...parseLocation(location),
@@ -65,42 +129,38 @@ function finishComment(pending: PendingComment, index: number): TuicrComment | u
   };
 }
 
-/** Parse the numbered comments emitted by tuicr's markdown exporter. */
+/** Parse tuicr's markdown exporter output into comments using a Markdown AST. */
 export function parseTuicrReview(markdown: string): TuicrReview {
+  const tree = unified().use(remarkParse).parse(markdown) as Root;
   const comments: TuicrComment[] = [];
-  let pending: PendingComment | undefined;
+  let session: string | undefined;
+  let summary: string | undefined;
 
-  const flush = () => {
-    if (!pending) return;
-    const parsed = finishComment(pending, comments.length);
-    if (parsed) comments.push(parsed);
-    pending = undefined;
+  const visit = (node: MarkdownNode) => {
+    if (node.type === "heading") {
+      const heading = inlineText(node).trim();
+      const match = heading.match(/^Session:\s*(.+)$/i);
+      if (match) session = match[1].trim();
+    } else if (node.type === "paragraph") {
+      const paragraph = inlineText(node).trim();
+      const match = paragraph.match(/^Summary:\s*([\s\S]+)$/i);
+      if (match && summary === undefined) summary = match[1].trim();
+    }
+
+    if (node.type === "list" && "ordered" in node && node.ordered && "children" in node && node.children) {
+      const start = "start" in node && typeof node.start === "number" ? node.start : 1;
+      for (const [itemIndex, item] of node.children.entries()) {
+        const comment = parseComment(item, start + itemIndex, comments.length);
+        if (comment) comments.push(comment);
+      }
+      return;
+    }
+
+    if ("children" in node && node.children) {
+      for (const child of node.children) visit(child);
+    }
   };
 
-  for (const line of markdown.replace(/\r\n?/g, "\n").split("\n")) {
-    const item = line.match(/^(\d+)\.\s+(.*)$/);
-    if (item) {
-      flush();
-      pending = {
-        ordinal: Number.parseInt(item[1], 10),
-        firstLine: item[2],
-        continuationIndent: item[1].length + 2,
-        continuation: [],
-      };
-      continue;
-    }
-
-    if (!pending) continue;
-    const indentation = line.match(/^\s*/)?.[0].length ?? 0;
-    if (indentation >= pending.continuationIndent) {
-      pending.continuation.push(line.slice(pending.continuationIndent));
-    } else {
-      flush();
-    }
-  }
-  flush();
-
-  const session = markdown.match(/^## Session:\s*(.+)$/m)?.[1].trim();
-  const summary = markdown.match(/^Summary:\s*(.+)$/m)?.[1].trim();
+  visit(tree);
   return { session, summary, comments };
 }

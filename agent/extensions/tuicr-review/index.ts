@@ -2,7 +2,8 @@ import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { Key, matchesKey, truncateToWidth } from "@earendil-works/pi-tui";
+import { Key, matchesKey, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { commentLabel } from "./labels.js";
 import { parseTuicrReview, type TuicrComment, type TuicrReview } from "./parser.js";
 
 const STATE_ENTRY_TYPE = "tuicr-review-state";
@@ -24,12 +25,6 @@ function resolveReviewPath(argument: string, cwd: string): string {
   if (value === "~") value = homedir();
   else if (value.startsWith("~/")) value = path.join(homedir(), value.slice(2));
   return path.resolve(cwd, value);
-}
-
-function commentLabel(comment: TuicrComment): string {
-  const type = comment.type ? `[${comment.type}] ` : "";
-  const firstLine = comment.body.split("\n", 1)[0];
-  return `${comment.ordinal}. ${type}${comment.location} — ${firstLine}`;
 }
 
 async function selectComments(
@@ -104,7 +99,7 @@ async function selectComments(
           const prefix = `${focused ? ">" : " "} ${checkbox} `;
           const label = commentLabel(comment);
           const styled = focused ? theme.fg("accent", label) : theme.fg("text", label);
-          lines.push(truncateToWidth(prefix + styled, renderWidth));
+          lines.push(...wrapTextWithAnsi(prefix + styled, renderWidth));
         }
 
         if (comments.length > MAX_VISIBLE_COMMENTS) {
