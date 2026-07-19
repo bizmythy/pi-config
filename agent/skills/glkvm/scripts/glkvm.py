@@ -4,6 +4,7 @@
 # dependencies = [
 #     "click>=8.3.1",
 #     "httpx>=0.28.1",
+#     "secretspec>=0.16,<0.17",
 # ]
 # ///
 
@@ -13,17 +14,16 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 import sys
 from pathlib import Path
 from typing import Any
 
 import click
 import httpx
+from secretspec import SecretSpec, SecretSpecError
 
 BASE_URL = "https://kvm.home.drewcouncil.com"
-OP_ACCOUNT = "L23KMYOBNVHLPGSIPDX7BAQ5LA"
-OP_ITEM = "o3dkht4tgtuplppaphirqo5gxm"
+SECRETSPEC_PATH = Path(__file__).resolve().parents[4] / "secretspec.toml"
 STATE_DIR = Path(os.environ.get("XDG_RUNTIME_DIR", f"/tmp/glkvm-{os.getuid()}")) / "pi-glkvm"
 COOKIE_FILE = STATE_DIR / "cookies.json"
 DEFAULT_SNAPSHOT = Path("/tmp/glkvm_snapshot.jpg")
@@ -35,7 +35,7 @@ def fail(message: str) -> None:
 
 def load_cookies() -> dict[str, str]:
     if not COOKIE_FILE.exists():
-        fail("Not logged in. Run `glkvm.py login` once (this invokes 1Password).")
+        fail("Not logged in. Run `glkvm.py login` once (this resolves credentials through SecretSpec).")
     try:
         return json.loads(COOKIE_FILE.read_text())
     except (OSError, json.JSONDecodeError) as exc:
@@ -62,7 +62,7 @@ def request(method: str, path: str, **kwargs: Any) -> httpx.Response:
     except httpx.HTTPError as exc:
         fail(f"GLKVM request failed: {exc}")
     if response.status_code in (401, 403):
-        fail("GLKVM session expired. Run `glkvm.py login` (invokes 1Password once).")
+        fail("GLKVM session expired. Run `glkvm.py login` (resolves credentials through SecretSpec once).")
     try:
         response.raise_for_status()
     except httpx.HTTPStatusError as exc:
@@ -78,30 +78,29 @@ def emit(response: httpx.Response) -> None:
         click.echo(response.text)
 
 
-def op_credentials() -> tuple[str, str]:
-    """Read the 1Password item once; never persist the password."""
+def secretspec_credentials() -> tuple[str, str]:
+    """Resolve the GLKVM credentials once; never persist the password."""
     try:
-        result = subprocess.run(
-            ["op", "item", "get", OP_ITEM, "--account", OP_ACCOUNT, "--format", "json"],
-            check=True,
-            capture_output=True,
-            text=True,
+        resolved = (
+            SecretSpec.builder()
+            .with_path(str(SECRETSPEC_PATH))
+            .with_profile("glkvm")
+            .with_reason("Authenticate a GLKVM session")
+            .load()
         )
-        item = json.loads(result.stdout)
-    except FileNotFoundError:
-        fail("The `op` CLI is not installed.")
-    except subprocess.CalledProcessError as exc:
-        fail(f"1Password failed: {exc.stderr.strip()}")
-    except json.JSONDecodeError:
-        fail("1Password returned invalid JSON.")
+    except SecretSpecError as exc:
+        fail(f"SecretSpec failed to resolve GLKVM credentials: {exc}")
 
-    fields = {field.get("id"): field.get("value") for field in item.get("fields", [])}
-    fields.update({field.get("label", "").lower(): field.get("value") for field in item.get("fields", [])})
-    username = fields.get("username") or "admin"
-    password = fields.get("password")
-    if not password:
-        fail("The GLKVM 1Password item has no password field.")
-    return str(username), str(password)
+    try:
+        username = resolved.secrets.get("GLKVM_USERNAME")
+        password = resolved.secrets.get("GLKVM_PASSWORD")
+        username_value = username.get if username else "admin"
+        password_value = password.get if password else None
+        if not password_value:
+            fail("SecretSpec returned an empty GLKVM_PASSWORD.")
+        return username_value or "admin", password_value
+    finally:
+        resolved.close()
 
 
 @click.group(context_settings={"help_option_names": ["-h", "--help"]})
@@ -111,8 +110,8 @@ def cli() -> None:
 
 @cli.command()
 def login() -> None:
-    """Fetch credentials once from 1Password and cache only session cookies."""
-    username, password = op_credentials()
+    """Resolve credentials once through SecretSpec and cache only session cookies."""
+    username, password = secretspec_credentials()
     try:
         with client(authenticated=False) as session:
             response = session.post("/api/auth/login", data={"user": username, "passwd": password})
@@ -128,7 +127,7 @@ def login() -> None:
 
 @cli.command()
 def logout() -> None:
-    """Delete locally cached session cookies (does not invoke 1Password)."""
+    """Delete locally cached session cookies (does not resolve credentials)."""
     COOKIE_FILE.unlink(missing_ok=True)
     click.echo("Cached GLKVM session removed.")
 

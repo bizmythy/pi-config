@@ -68,7 +68,7 @@ def main [
     error make {msg: $"Missing agent npm package manifest: ($agent_dir | path join 'package.json')"}
   }
 
-  let required_commands = ["pi-npm", "pi", "linear"]
+  let required_commands = ["pi-npm", "pi", "linear", "node"]
   for cmd in $required_commands {
     if not (command-exists $cmd) {
       error make {msg: $"Missing required command `($cmd)`. Install/start Pi first so its commands are available."}
@@ -88,26 +88,6 @@ def main [
     do { cd $repo; ^git pull --ff-only --autostash }
   }
 
-  if (linear-authenticated) {
-    print "==> Linear CLI is authenticated"
-  } else {
-    if not (command-exists "op") {
-      error make {msg: "Missing required command `op`; needed to fetch the Linear CLI credential from 1Password."}
-    }
-
-    print "==> Authenticating Linear CLI"
-    let linear_credential = (^op --account PLU4HO2JCJF23NNQK2ERWIYIZI read "op://Employee/linear-cli-access/credential" | str trim)
-    if ($linear_credential | is-empty) {
-      error make {msg: "1Password returned an empty Linear CLI credential."}
-    }
-
-    $linear_credential | ^linear auth login --plaintext
-
-    if not (linear-authenticated) {
-      error make {msg: "Linear CLI authentication failed."}
-    }
-  }
-
   mkdir $cache_dir
 
   print "==> Installing local npm workspace and applying patches"
@@ -120,10 +100,22 @@ def main [
     ^pi-npm --prefix $agent_dir install
   }
 
+  if (linear-authenticated) {
+    print "==> Linear CLI is authenticated"
+  } else {
+    print "==> Authenticating Linear CLI through SecretSpec"
+    ^node ($agent_dir | path join "scripts" "linear-auth.mjs")
+
+    if not (linear-authenticated) {
+      error make {msg: "Linear CLI authentication failed."}
+    }
+  }
+
   let required_local_packages = [
     ($npm_dir | path join "node_modules" "pi-vim"),
     ($agent_dir | path join "node_modules" "qrcode"),
     ($agent_dir | path join "node_modules" "remark-parse"),
+    ($agent_dir | path join "node_modules" "secretspec"),
     ($agent_dir | path join "node_modules" "unified"),
     ($agent_dir | path join "node_modules" "ws"),
   ]

@@ -4,6 +4,7 @@
   "dependencies": {
     "qrcode": "^1.5.4",
     "remark-parse": "^11.0.0",
+    "secretspec": "^0.16.0",
     "unified": "^11.0.5",
     "ws": "^8.21.0"
   }
