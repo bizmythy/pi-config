@@ -52,6 +52,7 @@ def main [
 ] {
   let repo = ($env.FILE_PWD? | default $env.PWD)
   let npm_dir = ($repo | path join "npm")
+  let typecheck_dir = ($npm_dir | path join "typecheck")
   let agent_dir = ($repo | path join "agent")
   let cache_dir = ($repo | path join "npm-cache")
   let secrets_dir = ($repo | path join "secrets")
@@ -122,16 +123,15 @@ def main [
     do { cd $npm_dir; ^pi-npm install --include=dev }
   }
 
-  # Pi's Nix package does not expose dependencies through a conventional global
-  # node_modules tree. Install matching declarations locally so check.nu is
-  # portable and always checks extensions against the Pi that will load them.
+  # Keep these separate from the locked workspace. Asking npm to replace a
+  # locked package in-place triggers an npm 11 Arborist rollback bug on reruns.
   let active_pi_version = (^pi --version o+e>| str trim)
   print $"==> Installing type declarations for Pi ($active_pi_version)"
   with-env {npm_config_cache: $cache_dir} {
-    do { cd $npm_dir; ^pi-npm install --include=dev --no-save $"@earendil-works/pi-coding-agent@($active_pi_version)" }
+    ^pi-npm --prefix $typecheck_dir install --no-save $"@earendil-works/pi-coding-agent@($active_pi_version)"
   }
 
-  let typecheck_pi_package = ($npm_dir | path join "node_modules" "@earendil-works" "pi-coding-agent" "package.json")
+  let typecheck_pi_package = ($typecheck_dir | path join "node_modules" "@earendil-works" "pi-coding-agent" "package.json")
   if not ($typecheck_pi_package | path exists) {
     error make {msg: $"Pi type-check package was not installed: ($typecheck_pi_package)"}
   }

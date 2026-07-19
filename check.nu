@@ -7,6 +7,7 @@
 def main [] {
   let repo = ($env.FILE_PWD? | default $env.PWD)
   let npm_dir = ($repo | path join "npm")
+  let typecheck_dir = ($npm_dir | path join "typecheck" "node_modules")
   let biome = ($npm_dir | path join "node_modules" ".bin" "biome")
   let tsgo = ($npm_dir | path join "node_modules" ".bin" "tsgo")
 
@@ -18,9 +19,9 @@ def main [] {
     error make {msg: $"Missing tsgo binary: ($tsgo). Run ./install.nu first."}
   }
 
-  let typecheck_pi_package = ($npm_dir | path join "node_modules" "@earendil-works" "pi-coding-agent" "package.json")
-  let typecheck_pi_types = ($npm_dir | path join "node_modules" "@earendil-works" "pi-coding-agent" "dist" "index.d.ts")
-  let typecheck_tui_types = ($npm_dir | path join "node_modules" "@earendil-works" "pi-coding-agent" "node_modules" "@earendil-works" "pi-tui" "dist" "index.d.ts")
+  let typecheck_pi_package = ($typecheck_dir | path join "@earendil-works" "pi-coding-agent" "package.json")
+  let typecheck_pi_types = ($typecheck_dir | path join "@earendil-works" "pi-coding-agent" "dist" "index.d.ts")
+  let typecheck_tui_types = ($typecheck_dir | path join "@earendil-works" "pi-coding-agent" "node_modules" "@earendil-works" "pi-tui" "dist" "index.d.ts")
 
   for type_file in [$typecheck_pi_types $typecheck_tui_types] {
     if not ($type_file | path exists) {

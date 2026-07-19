@@ -22,6 +22,9 @@ __pycache__/
 npm/*
 !npm/package.json
 !npm/package-lock.json
+!npm/typecheck/
+npm/typecheck/*
+!npm/typecheck/package.json
 npm-cache/
 agent/git/
 agent/node_modules/
