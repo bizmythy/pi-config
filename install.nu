@@ -7,6 +7,7 @@
 # - applies patch-package patches from ./patches via npm postinstall
 # - applies patch-package patches from ./agent/patches to Pi-managed npm packages
 # - updates/installs Pi-managed npm packages from agent/settings.json
+# - generates local secret files from the committed 1Password templates
 # - verifies that the Linear CLI is authenticated
 # - verifies that Pi can resolve the configured packages
 #
@@ -53,6 +54,12 @@ def main [
   let npm_dir = ($repo | path join "npm")
   let agent_dir = ($repo | path join "agent")
   let cache_dir = ($repo | path join "npm-cache")
+  let secrets_dir = ($repo | path join "secrets")
+  let personal_secrets = ($secrets_dir | path join "personal.json")
+  let work_secrets = ($secrets_dir | path join "work.json")
+  # Account UUIDs reported by `op account list --format=json`.
+  let personal_account = "XH4EFF5WXBGXJOIXZG4PLGILIE"
+  let work_account = "MHSAC4QES5HYTEKXKZQN27PFXQ"
 
   print $"==> Pi config repo: ($repo)"
 
@@ -68,7 +75,7 @@ def main [
     error make {msg: $"Missing agent npm package manifest: ($agent_dir | path join 'package.json')"}
   }
 
-  let required_commands = ["pi-npm", "pi", "linear"]
+  let required_commands = ["pi-npm", "pi", "linear", "op"]
   for cmd in $required_commands {
     if not (command-exists $cmd) {
       error make {msg: $"Missing required command `($cmd)`. Install/start Pi first so its commands are available."}
@@ -88,17 +95,17 @@ def main [
     do { cd $repo; ^git pull --ff-only --autostash }
   }
 
+  print "==> Generating local secret files"
+  ^op --account $personal_account inject --in-file ($secrets_dir | path join "personal.json.tpl") --out-file $personal_secrets --force
+  ^op --account $work_account inject --in-file ($secrets_dir | path join "work.json.tpl") --out-file $work_secrets --force
+
   if (linear-authenticated) {
     print "==> Linear CLI is authenticated"
   } else {
-    if not (command-exists "op") {
-      error make {msg: "Missing required command `op`; needed to fetch the Linear CLI credential from 1Password."}
-    }
-
     print "==> Authenticating Linear CLI"
-    let linear_credential = (^op --account PLU4HO2JCJF23NNQK2ERWIYIZI read "op://Employee/linear-cli-access/credential" | str trim)
+    let linear_credential = (open $work_secrets | get linear.credential | into string | str trim)
     if ($linear_credential | is-empty) {
-      error make {msg: "1Password returned an empty Linear CLI credential."}
+      error make {msg: "The generated work secret file contains an empty Linear CLI credential."}
     }
 
     $linear_credential | ^linear auth login --plaintext

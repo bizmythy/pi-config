@@ -1,69 +1,47 @@
-import { execFile } from "node:child_process";
+import { readFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-const SECRET_REFS = {
-  GEMINI_API_KEY: "op://Employee/pi-agent-gemini-key/credential",
-  EXA_API_KEY: "op://Employee/exa-api-key/credential",
-} as const;
-
+const SECRETS_FILE = join(homedir(), ".pi", "secrets", "work.json");
+const ENV_NAMES = ["GEMINI_API_KEY", "EXA_API_KEY"] as const;
 const RELEVANT_TOOLS = new Set(["fetch_content", "web_search", "code_search"]);
 
-type EnvName = keyof typeof SECRET_REFS;
+type EnvName = (typeof ENV_NAMES)[number];
 type Credentials = Record<EnvName, string>;
 type EnvSnapshot = Partial<Record<EnvName, string | undefined>>;
+type WorkSecrets = {
+  webAccess: {
+    geminiApiKey: string;
+    exaApiKey: string;
+  };
+};
 
 let cachedCredentials: Credentials | null = null;
 let credentialsPromise: Promise<Credentials> | null = null;
 let envSnapshot: EnvSnapshot | null = null;
 let credentialsExposed = false;
 
-function readOnePasswordSecrets(): Promise<Credentials> {
-  return new Promise((resolve, reject) => {
-    const template = Object.entries(SECRET_REFS)
-      .map(([envName, secretRef]) => `${envName}={{ ${secretRef} }}`)
-      .join("\n");
+async function readCredentials(): Promise<Credentials> {
+  const secrets = JSON.parse(await readFile(SECRETS_FILE, "utf8")) as WorkSecrets;
+  const credentials = {
+    GEMINI_API_KEY: secrets.webAccess.geminiApiKey?.trim(),
+    EXA_API_KEY: secrets.webAccess.exaApiKey?.trim(),
+  };
 
-    execFile(
-      "sh",
-      ["-c", 'printf %s "$1" | op inject', "op-inject", template],
-      { timeout: 15_000 },
-      (err, stdout, stderr) => {
-        if (err) {
-          const detail = (stderr || err.message || String(err)).trim();
-          reject(new Error(detail || "failed to read 1Password secrets"));
-          return;
-        }
+  for (const envName of ENV_NAMES) {
+    if (!credentials[envName]) {
+      throw new Error(`${SECRETS_FILE} contains an empty ${envName}`);
+    }
+  }
 
-        const credentials = Object.fromEntries(
-          stdout
-            .split("\n")
-            .filter(Boolean)
-            .map((line) => {
-              const separator = line.indexOf("=");
-              if (separator === -1) return [line, ""];
-              return [line.slice(0, separator), line.slice(separator + 1)];
-            }),
-        ) as Partial<Credentials>;
-
-        for (const envName of Object.keys(SECRET_REFS) as EnvName[]) {
-          const value = credentials[envName]?.trim();
-          if (!value) {
-            reject(new Error(`1Password returned an empty ${envName}`));
-            return;
-          }
-          credentials[envName] = value;
-        }
-
-        resolve(credentials as Credentials);
-      },
-    );
-  });
+  return credentials;
 }
 
 async function getWebAccessCredentials(): Promise<Credentials> {
   if (cachedCredentials) return cachedCredentials;
   if (!credentialsPromise) {
-    credentialsPromise = readOnePasswordSecrets()
+    credentialsPromise = readCredentials()
       .then((credentials) => {
         cachedCredentials = credentials;
         return credentials;
@@ -79,7 +57,7 @@ async function getWebAccessCredentials(): Promise<Credentials> {
 function applyCredentialsToEnvironment(credentials: Credentials): void {
   if (!envSnapshot) {
     envSnapshot = {};
-    for (const envName of Object.keys(SECRET_REFS) as EnvName[]) {
+    for (const envName of ENV_NAMES) {
       envSnapshot[envName] = process.env[envName];
     }
   }
@@ -97,7 +75,7 @@ async function exposeCredentials(): Promise<void> {
 function restoreEnvironment(): void {
   if (!credentialsExposed) return;
 
-  for (const envName of Object.keys(SECRET_REFS) as EnvName[]) {
+  for (const envName of ENV_NAMES) {
     const previous = envSnapshot?.[envName];
     if (previous === undefined) {
       delete process.env[envName];
@@ -117,7 +95,7 @@ export default function (pi: ExtensionAPI) {
       await exposeCredentials();
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      ctx.ui.notify(`Could not read web access API keys from 1Password: ${message}`, "error");
+      ctx.ui.notify(`Could not read web access API keys: ${message}`, "error");
     }
   });
 
@@ -125,8 +103,8 @@ export default function (pi: ExtensionAPI) {
     restoreEnvironment();
   });
 
-  pi.registerCommand("web-access-op", {
-    description: "Expose the Gemini and Exa API keys from 1Password to web access tools for this Pi session",
+  pi.registerCommand("web-access-secrets", {
+    description: "Expose the Gemini and Exa API keys to web access tools for this Pi session",
     handler: async (_args, ctx) => {
       try {
         await exposeCredentials();

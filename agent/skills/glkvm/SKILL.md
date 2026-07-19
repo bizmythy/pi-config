@@ -2,7 +2,7 @@
 name: glkvm
 description: Manually invoked control of the configured PC through the GLKVM at kvm.home.drewcouncil.com. Supports screenshots, keyboard, mouse, OCR, Fingerbot, and API inspection.
 disable-model-invocation: true
-compatibility: Requires uv, network access to kvm.home.drewcouncil.com, and the 1Password CLI for explicit session login.
+compatibility: Requires network access to kvm.home.drewcouncil.com.
 ---
 
 # GLKVM Control Skill
@@ -10,15 +10,13 @@ compatibility: Requires uv, network access to kvm.home.drewcouncil.com, and the 
 ## Fixed setup
 
 - GLKVM: `https://kvm.home.drewcouncil.com`
-- 1Password account: `L23KMYOBNVHLPGSIPDX7BAQ5LA`
-- 1Password item: `GLiNet GL-RM10 Network KVM` (`o3dkht4tgtuplppaphirqo5gxm`)
 - Deterministic CLI: `scripts/glkvm.py`
 
-Do not ask for the address, username, or password. Do not invoke `op` directly and do not use the curl examples below for real interactions. The CLI has the setup embedded, obtains both fields in one `op item get` invocation, never prints or persists the password, and caches only GLKVM session cookies.
+Do not ask for the address, username, or password, and do not use the curl examples below for real interactions. The CLI has the setup embedded, never prints the password, and caches only GLKVM session cookies.
 
 ## Initialization
 
-First try a read-only command, which reuses the cached session and does **not** invoke 1Password:
+First try a read-only command, which reuses the cached session:
 
 ```bash
 ./scripts/glkvm.py status
@@ -30,7 +28,7 @@ Only if it says the session is missing or expired, run this once:
 ./scripts/glkvm.py login
 ```
 
-That command intentionally causes one 1Password approval popup. Do not run it again while the cached session works.
+Do not run it again while the cached session works.
 
 ## Required interaction workflow
 

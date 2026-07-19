@@ -1,5 +1,6 @@
 # authentication
 agent/auth.json
+secrets/*.json
 # session logs
 agent/sessions/
 agent/plans/
