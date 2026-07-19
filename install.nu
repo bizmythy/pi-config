@@ -115,6 +115,24 @@ def main [
     do { cd $npm_dir; ^pi-npm install --include=dev }
   }
 
+  # Pi's Nix package does not expose dependencies through a conventional global
+  # node_modules tree. Install matching declarations locally so check.nu is
+  # portable and always checks extensions against the Pi that will load them.
+  let active_pi_version = (^pi --version o+e>| str trim)
+  print $"==> Installing type declarations for Pi ($active_pi_version)"
+  with-env {npm_config_cache: $cache_dir} {
+    do { cd $npm_dir; ^pi-npm install --include=dev --no-save $"@earendil-works/pi-coding-agent@($active_pi_version)" }
+  }
+
+  let typecheck_pi_package = ($npm_dir | path join "node_modules" "@earendil-works" "pi-coding-agent" "package.json")
+  if not ($typecheck_pi_package | path exists) {
+    error make {msg: $"Pi type-check package was not installed: ($typecheck_pi_package)"}
+  }
+  let typecheck_pi_version = (open $typecheck_pi_package | get version)
+  if $typecheck_pi_version != $active_pi_version {
+    error make {msg: $"Installed Pi type-check package version (($typecheck_pi_version)) does not match active Pi (($active_pi_version))."}
+  }
+
   print "==> Installing agent extension npm workspace"
   with-env {npm_config_cache: $cache_dir} {
     ^pi-npm --prefix $agent_dir install
