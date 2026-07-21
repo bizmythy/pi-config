@@ -1,6 +1,6 @@
 {
   "glkvm": {
-    "username": "{{ op://Private/o3dkht4tgtuplppaphirqo5gxm/username }}",
+    "username": "admin",
     "password": "{{ op://Private/o3dkht4tgtuplppaphirqo5gxm/password }}"
   }
 }

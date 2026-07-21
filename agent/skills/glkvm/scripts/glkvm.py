@@ -20,6 +20,7 @@ import click
 import httpx
 
 BASE_URL = "https://kvm.home.drewcouncil.com"
+CLI_PATH = "~/.pi/agent/skills/glkvm/scripts/glkvm.py"
 SECRETS_FILE = Path.home() / ".pi" / "secrets" / "personal.json"
 STATE_DIR = Path(os.environ.get("XDG_RUNTIME_DIR", f"/tmp/glkvm-{os.getuid()}")) / "pi-glkvm"
 COOKIE_FILE = STATE_DIR / "cookies.json"
@@ -32,7 +33,7 @@ def fail(message: str) -> None:
 
 def load_cookies() -> dict[str, str]:
     if not COOKIE_FILE.exists():
-        fail("Not logged in. Run `glkvm.py login`.")
+        fail(f"Not logged in. Run `{CLI_PATH} login`.")
     try:
         return json.loads(COOKIE_FILE.read_text())
     except (OSError, json.JSONDecodeError) as exc:
@@ -59,7 +60,7 @@ def request(method: str, path: str, **kwargs: Any) -> httpx.Response:
     except httpx.HTTPError as exc:
         fail(f"GLKVM request failed: {exc}")
     if response.status_code in (401, 403):
-        fail("GLKVM session expired. Run `glkvm.py login`.")
+        fail(f"GLKVM session expired. Run `{CLI_PATH} login`.")
     try:
         response.raise_for_status()
     except httpx.HTTPStatusError as exc:
@@ -79,12 +80,12 @@ def load_credentials() -> tuple[str, str]:
     """Read GLKVM credentials from the generated personal secret file."""
     try:
         glkvm = json.loads(SECRETS_FILE.read_text())["glkvm"]
-        username = glkvm["username"]
+        username = glkvm.get("username") or "admin"
         password = glkvm["password"]
-    except (OSError, json.JSONDecodeError, KeyError, TypeError) as exc:
+    except (OSError, json.JSONDecodeError, AttributeError, KeyError, TypeError) as exc:
         fail(f"Cannot read GLKVM credentials from {SECRETS_FILE}: {exc}")
-    if not username or not password:
-        fail(f"GLKVM credentials in {SECRETS_FILE} must not be empty.")
+    if not password:
+        fail(f"The GLKVM password in {SECRETS_FILE} must not be empty.")
     return str(username), str(password)
 
 

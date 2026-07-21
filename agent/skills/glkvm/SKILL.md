@@ -10,56 +10,56 @@ compatibility: Requires network access to kvm.home.drewcouncil.com.
 ## Fixed setup
 
 - GLKVM: `https://kvm.home.drewcouncil.com`
-- Deterministic CLI: `scripts/glkvm.py`
+- Deterministic CLI: `~/.pi/agent/skills/glkvm/scripts/glkvm.py`
 
-Do not ask for the address, username, or password, and do not use the curl examples below for real interactions. The CLI has the setup embedded, never prints the password, and caches only GLKVM session cookies.
+Do not ask for the address, username, or password, and do not use the curl examples below for real interactions. The CLI has the setup embedded, never prints the password, and caches only GLKVM session cookies. Always invoke it by the home-relative path shown here; never resolve `scripts/glkvm.py` relative to the session's working directory.
 
 ## Initialization
 
 First try a read-only command, which reuses the cached session:
 
 ```bash
-./scripts/glkvm.py status
+~/.pi/agent/skills/glkvm/scripts/glkvm.py status
 ```
 
 Only if it says the session is missing or expired, run this once:
 
 ```bash
-./scripts/glkvm.py login
+~/.pi/agent/skills/glkvm/scripts/glkvm.py login
 ```
 
 Do not run it again while the cached session works.
 
 ## Required interaction workflow
 
-Run commands from this skill directory. Start by observing, perform the smallest action needed, then observe again:
+The session can have any working directory. Invoke the CLI with its home-relative path. Start by observing, perform the smallest action needed, then observe again:
 
 ```bash
-./scripts/glkvm.py snapshot
+~/.pi/agent/skills/glkvm/scripts/glkvm.py snapshot
 # Read /tmp/glkvm_snapshot.jpg with the read tool.
-./scripts/glkvm.py --help
+~/.pi/agent/skills/glkvm/scripts/glkvm.py --help
 ```
 
-Common deterministic commands:
+Common deterministic commands (set `GLKVM=~/.pi/agent/skills/glkvm/scripts/glkvm.py` to shorten repeated calls):
 
 ```bash
-./scripts/glkvm.py status
-./scripts/glkvm.py snapshot [--full] [--ocr]
-./scripts/glkvm.py key KEY_ENTER
-./scripts/glkvm.py shortcut 'ControlLeft,KeyC'
-./scripts/glkvm.py type 'literal text' [--slow]
-./scripts/glkvm.py move-pixel X Y --width W --height H
-./scripts/glkvm.py click [--button left|right|middle]
-./scripts/glkvm.py relative DX DY
-./scripts/glkvm.py scroll DY
-./scripts/glkvm.py reset
-./scripts/glkvm.py fingerbot status
+$GLKVM status
+$GLKVM snapshot [--full] [--ocr]
+$GLKVM key KEY_ENTER
+$GLKVM shortcut 'ControlLeft,KeyC'
+$GLKVM type 'literal text' [--slow]
+$GLKVM move-pixel X Y --width W --height H
+$GLKVM click [--button left|right|middle]
+$GLKVM relative DX DY
+$GLKVM scroll DY
+$GLKVM reset
+$GLKVM fingerbot status
 ```
 
 - Always view a fresh screenshot before deciding coordinates and after an action to verify it.
 - Do not type or click unless the current screenshot makes the target and effect clear.
 - Treat Fingerbot presses, PC power operations, KVM reboot, firmware operations, and remote-media operations as destructive/high-impact. Obtain explicit user confirmation immediately before them. The CLI also confirms Fingerbot presses interactively.
-- The remainder of this document is the original skill's API reference. It explains behavior and key names, but its generic `<IP>` curl snippets are reference-only. Use `scripts/glkvm.py`, never raw curl, for this installation.
+- The remainder of this document is the original skill's API reference. It explains behavior and key names, but its generic `<IP>` curl snippets are reference-only. Use the home-relative CLI path above, never raw curl, for this installation.
 
 ---
 
