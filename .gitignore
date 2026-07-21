@@ -33,3 +33,5 @@ agent/remote-control.json
 agent/prompt-history.json.*.tmp
 agent/run-history.jsonl
 agent/local-settings.json
+agent/models-store.json
+
