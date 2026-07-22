@@ -7,6 +7,7 @@
 # - applies patch-package patches from ./patches via npm postinstall
 # - applies patch-package patches from ./agent/patches to Pi-managed npm packages
 # - updates/installs Pi-managed npm packages from agent/settings.json
+# - creates isolated work/personal Pi login profiles (existing logins become work)
 # - generates local secret files from the committed 1Password templates
 # - verifies that the Linear CLI is authenticated
 # - verifies that Pi can resolve the configured packages
@@ -24,6 +25,44 @@ def command-exists [cmd: string] {
 def linear-authenticated [] {
   let result = (do { ^linear auth whoami } | complete)
   $result.exit_code == 0
+}
+
+def setup-auth-profiles [agent_dir: string] {
+  let auth_file = ($agent_dir | path join "auth.json")
+  let backup_file = ($agent_dir | path join "auth.pre-profiles.json")
+  let profiles_dir = ($agent_dir | path join "auth-profiles")
+  let work_profile = ($profiles_dir | path join "work.json")
+  let personal_profile = ($profiles_dir | path join "personal.json")
+  let profile_config = ($agent_dir | path join "auth-profiles.json")
+
+  print "==> Configuring independent work/personal Pi login profiles"
+  mkdir $profiles_dir
+
+  if not ($work_profile | path exists) {
+    if ($auth_file | path exists) {
+      if not ($backup_file | path exists) {
+        cp $auth_file $backup_file
+      }
+      cp $auth_file $work_profile
+      print $"    Imported existing Pi logins into ($work_profile)"
+    } else {
+      "{}\n" | save $work_profile
+    }
+  }
+
+  if not ($personal_profile | path exists) {
+    "{}\n" | save $personal_profile
+  }
+
+  if not ($profile_config | path exists) {
+    {activeProfile: "work"} | to json --indent 2 | save $profile_config
+  }
+
+  ^chmod 700 $profiles_dir
+  ^chmod 600 $work_profile $personal_profile $profile_config
+  if ($backup_file | path exists) {
+    ^chmod 600 $backup_file
+  }
 }
 
 def apply-agent-npm-patches [npm_dir: string, agent_dir: string] {
@@ -95,6 +134,8 @@ def main [
     print "==> Updating git checkout"
     do { cd $repo; ^git pull --ff-only --autostash }
   }
+
+  setup-auth-profiles $agent_dir
 
   print "==> Generating local secret files"
   ^op --account $personal_account inject --in-file ($secrets_dir | path join "personal.json.tpl") --out-file $personal_secrets --force

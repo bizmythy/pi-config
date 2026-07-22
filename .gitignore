@@ -1,5 +1,8 @@
 # authentication
 agent/auth.json
+agent/auth.pre-profiles.json
+agent/auth-profiles.json
+agent/auth-profiles/
 secrets/*.json
 # session logs
 agent/sessions/
