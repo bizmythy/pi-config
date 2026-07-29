@@ -1,8 +1,11 @@
 diff --git a/node_modules/@nquandt/pi-azure-foundry/dist/index.js b/node_modules/@nquandt/pi-azure-foundry/dist/index.js
-index 0ce15dd..3766698 100644
+index 0ce15dd..4140850 100644
 --- a/node_modules/@nquandt/pi-azure-foundry/dist/index.js
 +++ b/node_modules/@nquandt/pi-azure-foundry/dist/index.js
-@@ -3,6 +3,7 @@ import { readFileSync, existsSync } from "node:fs";
+@@ -1,8 +1,10 @@
+ import { calculateCost, createAssistantMessageEventStream, } from "@earendil-works/pi-ai";
++import { openAIResponsesApi } from "@earendil-works/pi-ai/compat";
+ import { readFileSync, existsSync } from "node:fs";
  import { resolve } from "node:path";
  import { homedir } from "node:os";
  import { DefaultAzureCredential } from "@azure/identity";
@@ -10,7 +13,7 @@ index 0ce15dd..3766698 100644
  // =============================================================================
  // Token Provider
  // =============================================================================
-@@ -50,11 +51,17 @@ function loadConfig() {
+@@ -50,11 +52,17 @@ function loadConfig() {
          `\n\nCreate one in your project root or at ~/.pi/azure-foundry.config.json`);
  }
  const MODEL_DEFAULTS = {
@@ -28,7 +31,57 @@ index 0ce15dd..3766698 100644
      "gpt-4o": { contextWindow: 128000, maxTokens: 4096, reasoning: false, input: ["text", "image"] },
      "gpt-4o-mini": { contextWindow: 128000, maxTokens: 4096, reasoning: false, input: ["text", "image"] },
      "Kimi-K2.5": { contextWindow: 131072, maxTokens: 8192, reasoning: false, input: ["text"] },
-@@ -505,7 +512,15 @@ function streamAzureFoundry(model, context, options) {
+@@ -479,17 +487,43 @@ function streamAzureFoundry(model, context, options) {
+             timestamp: Date.now(),
+         };
+         try {
+-            const baseHost = new URL(model.baseUrl).origin;
+             const route = apiRouteMap.get(model.id) ?? { kind: "openai-chat-completions", tokenLimit: "max_tokens" };
+             // Resolve auth: use registered provider auth, fall back to api-key from options.
+             const auth = providerAuthMap.get(model.provider)
+                 ?? { type: "api-key", getToken: () => Promise.resolve(options?.apiKey ?? "") };
+-            if (route.kind === "anthropic-messages") {
+-                await streamAnthropic(model, context, options, output, stream, baseHost, auth);
+-            }
+-            else {
+-                await streamOpenAI(model, context, options, output, stream, baseHost, auth, route);
++            if (route.kind === "openai-chat-completions") {
++                // Account-level chat completions ignore project-scoped RBAC. Route OpenAI
++                // deployments through the project's Responses API instead.
++                const token = await auth.getToken();
++                const projectModel = {
++                    ...model,
++                    api: "openai-responses",
++                    baseUrl: `${model.baseUrl}/openai/v1`,
++                };
++                const innerStream = openAIResponsesApi().streamSimple(projectModel, context, {
++                    ...options,
++                    apiKey: token,
++                    // Foundry's project Responses endpoint requires explicit input item
++                    // discriminators, while OpenAI accepts the role/content shorthand.
++                    onPayload: async (payload, payloadModel) => {
++                        const transformed = await options?.onPayload?.(payload, payloadModel) ?? payload;
++                        if (!transformed || typeof transformed !== "object" || !Array.isArray(transformed.input))
++                            return transformed;
++                        return {
++                            ...transformed,
++                            input: transformed.input.map((item) => item && typeof item === "object" && "role" in item && !("type" in item)
++                                ? { type: "message", ...item }
++                                : item),
++                        };
++                    },
++                });
++                for await (const event of innerStream)
++                    stream.push(event);
++                stream.end();
++                return;
+             }
++            const baseHost = new URL(model.baseUrl).origin;
++            await streamAnthropic(model, context, options, output, stream, baseHost, auth);
+             stream.push({ type: "done", reason: output.stopReason, message: output });
+             stream.end();
+         }
+@@ -505,7 +539,15 @@ function streamAzureFoundry(model, context, options) {
  // =============================================================================
  // Extension Entry Point
  // =============================================================================
@@ -45,7 +98,7 @@ index 0ce15dd..3766698 100644
      const config = loadConfig();
      const endpoint = `https://${config.resourceId}.services.ai.azure.com/api/projects/${config.projectId}`;
      // Discover deployments
-@@ -536,10 +551,9 @@ export default async function (pi) {
+@@ -536,10 +578,9 @@ export default async function (pi) {
          const route = apiRouteMap.get(d.name);
          console.log(`[Azure Foundry] ${d.name}: no explicit defaults for "${modelName}" — using ${describeApiRoute(route)}`);
      }
@@ -58,7 +111,7 @@ index 0ce15dd..3766698 100644
          name: "Azure Foundry",
          baseUrl: endpoint,
          // For api-key auth, store the real key. For azure-identity, pass a sentinel
-@@ -552,4 +566,21 @@ export default async function (pi) {
+@@ -552,4 +593,21 @@ export default async function (pi) {
      });
      console.log(`[Azure Foundry] ✓ Registered ${deployments.length} model(s)`);
  }
