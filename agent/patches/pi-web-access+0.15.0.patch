@@ -1,8 +1,8 @@
 diff --git a/node_modules/pi-web-access/gemini-api.ts b/node_modules/pi-web-access/gemini-api.ts
-index 30668c3..1202a39 100644
+index fdb2d07..af1c510 100644
 --- a/node_modules/pi-web-access/gemini-api.ts
 +++ b/node_modules/pi-web-access/gemini-api.ts
-@@ -5,7 +5,7 @@ const DEFAULT_API_HOST = "https://generativelanguage.googleapis.com";
+@@ -6,7 +6,7 @@ const DEFAULT_API_HOST = "https://generativelanguage.googleapis.com";
  const API_VERSION = "v1beta";
  export const API_BASE = `${DEFAULT_API_HOST}/${API_VERSION}`;
  const CONFIG_PATH = getWebSearchConfigPath();
@@ -12,7 +12,7 @@ index 30668c3..1202a39 100644
  interface GeminiApiConfig {
  	geminiApiKey?: unknown;
 diff --git a/node_modules/pi-web-access/video-extract.ts b/node_modules/pi-web-access/video-extract.ts
-index 209b9c9..ca03ef2 100644
+index de63ad7..bb78add 100644
 --- a/node_modules/pi-web-access/video-extract.ts
 +++ b/node_modules/pi-web-access/video-extract.ts
 @@ -32,11 +32,22 @@ const VIDEO_EXTENSIONS: Record<string, string> = {
@@ -40,7 +40,7 @@ index 209b9c9..ca03ef2 100644
  interface VideoFileInfo {
  	absolutePath: string;
  	mimeType: string;
-@@ -66,7 +77,8 @@ function normalizeMaxSizeMB(value: unknown, fallback: number): number {
+@@ -68,7 +79,8 @@ function normalizeMaxSizeMB(value: unknown, fallback: number): number {
  
  const VIDEO_CONFIG_DEFAULTS: VideoConfig = {
  	enabled: true,
@@ -50,9 +50,9 @@ index 209b9c9..ca03ef2 100644
  	maxSizeMB: 50,
  };
  
-@@ -165,9 +177,10 @@ export async function extractVideo(
- 	const effectiveModel = options?.model ?? config.preferredModel;
- 	const displayName = basename(info.absolutePath);
+@@ -177,9 +189,10 @@ export async function extractVideo(
+ 		return { url: info.absolutePath, title: displayName, content: error, error };
+ 	}
  	const activityId = activityMonitor.logStart({ type: "fetch", url: `video:${displayName}` });
 +	const attemptErrors: string[] = [];
  
@@ -63,7 +63,7 @@ index 209b9c9..ca03ef2 100644
  
  	if (result) {
  		const thumbnail = await extractVideoFrame(info.absolutePath);
-@@ -183,8 +196,11 @@ export async function extractVideo(
+@@ -195,8 +208,11 @@ export async function extractVideo(
  		return null;
  	}
  
@@ -77,7 +77,7 @@ index 209b9c9..ca03ef2 100644
  }
  
  function mapFfprobeError(err: unknown): string {
-@@ -228,6 +244,7 @@ async function tryVideoGeminiWeb(
+@@ -240,6 +256,7 @@ async function tryVideoGeminiWeb(
  	prompt: string,
  	model: string,
  	signal?: AbortSignal,
@@ -85,7 +85,7 @@ index 209b9c9..ca03ef2 100644
  ): Promise<ExtractedContent | null> {
  	try {
  		const cookies = await isGeminiWebAvailable();
-@@ -249,15 +266,22 @@ async function tryVideoGeminiWeb(
+@@ -261,15 +278,22 @@ async function tryVideoGeminiWeb(
  		};
  	} catch (err) {
  		if (shouldRethrow(err)) throw err;
@@ -106,13 +106,14 @@ index 209b9c9..ca03ef2 100644
  	signal?: AbortSignal,
 +	attemptErrors: string[] = [],
  ): Promise<ExtractedContent | null> {
- 	const apiKey = getApiKey();
+ 	const apiKey = await getApiKey(signal);
  	if (!apiKey) return null;
-@@ -270,21 +294,35 @@ async function tryVideoGeminiApi(
+@@ -282,22 +306,36 @@ async function tryVideoGeminiApi(
  
  		await pollFileState(fileName, apiKey, signal, 120000);
  
 -		const text = await queryGeminiApiWithVideo(prompt, uploaded.uri, {
+-			apiKey,
 -			model,
 -			mimeType: info.mimeType,
 -			signal,
@@ -123,6 +124,7 @@ index 209b9c9..ca03ef2 100644
 +			if (signal?.aborted) return null;
 +			try {
 +				const text = await queryGeminiApiWithVideo(prompt, uploaded.uri, {
++					apiKey,
 +					model: candidate,
 +					mimeType: info.mimeType,
 +					signal,
