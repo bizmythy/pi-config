@@ -1,5 +1,5 @@
 import * as path from "node:path";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { type ExtensionAPI, getAgentDir } from "@earendil-works/pi-coding-agent";
 
 type ShellToken = { type: "word" | "control"; value: string };
 
@@ -94,6 +94,13 @@ function isPathBelowTmp(target: string, cwd: string): boolean {
 
   const absoluteTarget = path.isAbsolute(target) ? path.normalize(target) : path.resolve(cwd, target);
   return absoluteTarget !== "/tmp" && absoluteTarget !== "/tmp/" && absoluteTarget.startsWith("/tmp/");
+}
+
+function isPiManagedDependencyPath(filePath: string, cwd: string): boolean {
+  const managedDependencies = path.join(getAgentDir(), "npm", "node_modules");
+  const absolutePath = path.resolve(cwd, filePath);
+  const relativePath = path.relative(managedDependencies, absolutePath);
+  return relativePath !== "" && !relativePath.startsWith(`..${path.sep}`) && !path.isAbsolute(relativePath);
 }
 
 function isTemporaryVariableName(name: string): boolean {
@@ -290,6 +297,10 @@ export default function (pi: ExtensionAPI) {
       const normalizedPath = path.normalize(filePath);
 
       for (const { pattern, desc } of protectedPaths) {
+        // Installed pi packages are intentionally patchable; patch-package uses
+        // edits here as the source for persistent patches.
+        if (desc === "node_modules" && isPiManagedDependencyPath(filePath, ctx.cwd)) continue;
+
         if (pattern.test(normalizedPath)) {
           if (ctx.hasUI) ctx.ui.notify(`Blocked write to ${desc}: ${filePath}`, "warning");
           return { block: true, reason: `Protected path: ${desc}` };
