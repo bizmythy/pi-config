@@ -7,7 +7,7 @@
 # - applies patch-package patches from ./patches via npm postinstall
 # - applies patch-package patches from ./agent/patches to Pi-managed npm packages
 # - updates/installs Pi-managed npm packages from agent/settings.json
-# - creates isolated work/personal Pi login profiles (existing logins become work)
+# - creates isolated work/personal Pi login profiles (existing logins become personal; work uses Azure)
 # - generates local secret files from the committed 1Password templates
 # - verifies that the Linear CLI is authenticated
 # - verifies that Pi can resolve the configured packages
@@ -39,19 +39,19 @@ def setup-auth-profiles [agent_dir: string] {
   mkdir $profiles_dir
 
   if not ($work_profile | path exists) {
+    "{}\n" | save $work_profile
+  }
+
+  if not ($personal_profile | path exists) {
     if ($auth_file | path exists) {
       if not ($backup_file | path exists) {
         cp $auth_file $backup_file
       }
-      cp $auth_file $work_profile
-      print $"    Imported existing Pi logins into ($work_profile)"
+      cp $auth_file $personal_profile
+      print $"    Imported existing Pi logins into ($personal_profile)"
     } else {
-      "{}\n" | save $work_profile
+      "{}\n" | save $personal_profile
     }
-  }
-
-  if not ($personal_profile | path exists) {
-    "{}\n" | save $personal_profile
   }
 
   if not ($profile_config | path exists) {

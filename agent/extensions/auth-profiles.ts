@@ -105,7 +105,9 @@ async function bindProfile(registry: ModelRegistry, profile: ProfileName): Promi
 }
 
 async function providersFor(profile: ProfileName): Promise<string[]> {
-  return Object.keys(await readJson(profileAuthPath(profile))).sort();
+  const providers = Object.keys(await readJson(profileAuthPath(profile)));
+  if (profile === "work") providers.push("azure-foundry");
+  return providers.sort();
 }
 
 function setStatus(ctx: Pick<ExtensionContext, "ui">, profile: ProfileName): void {
@@ -164,6 +166,7 @@ export default function authProfiles(pi: ExtensionAPI) {
       await bindProfile(ctx.modelRegistry, selected);
       await writeActiveProfile(selected);
       activeProfile = selected;
+      pi.events.emit("auth-profile:changed", { profile: selected });
       setStatus(ctx, activeProfile);
       ctx.ui.notify(`Switched to ${selected}. /login and /logout now use only this profile.`, "info");
     },

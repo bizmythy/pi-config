@@ -1,0 +1,65 @@
+diff --git a/node_modules/@nquandt/pi-azure-foundry/dist/index.js b/node_modules/@nquandt/pi-azure-foundry/dist/index.js
+index 0ce15dd..6022ae6 100644
+--- a/node_modules/@nquandt/pi-azure-foundry/dist/index.js
++++ b/node_modules/@nquandt/pi-azure-foundry/dist/index.js
+@@ -3,6 +3,7 @@ import { readFileSync, existsSync } from "node:fs";
+ import { resolve } from "node:path";
+ import { homedir } from "node:os";
+ import { DefaultAzureCredential } from "@azure/identity";
++import { getAgentDir } from "@earendil-works/pi-coding-agent";
+ // =============================================================================
+ // Token Provider
+ // =============================================================================
+@@ -505,7 +506,15 @@ function streamAzureFoundry(model, context, options) {
+ // =============================================================================
+ // Extension Entry Point
+ // =============================================================================
+-export default async function (pi) {
++const PROVIDER_ID = "azure-foundry";
++function activeProfile() {
++    const path = resolve(getAgentDir(), "auth-profiles.json");
++    if (!existsSync(path))
++        return "work";
++    const config = JSON.parse(readFileSync(path, "utf-8"));
++    return config.activeProfile === "personal" ? "personal" : "work";
++}
++async function registerAzureFoundry(pi) {
+     const config = loadConfig();
+     const endpoint = `https://${config.resourceId}.services.ai.azure.com/api/projects/${config.projectId}`;
+     // Discover deployments
+@@ -536,10 +545,9 @@ export default async function (pi) {
+         const route = apiRouteMap.get(d.name);
+         console.log(`[Azure Foundry] ${d.name}: no explicit defaults for "${modelName}" — using ${describeApiRoute(route)}`);
+     }
+-    const providerId = "azure-foundry";
+     // Store the auth context so streamAzureFoundry can build the right headers per-request.
+-    providerAuthMap.set(providerId, { type: config.auth.type, getToken });
+-    pi.registerProvider(providerId, {
++    providerAuthMap.set(PROVIDER_ID, { type: config.auth.type, getToken });
++    pi.registerProvider(PROVIDER_ID, {
+         name: "Azure Foundry",
+         baseUrl: endpoint,
+         // For api-key auth, store the real key. For azure-identity, pass a sentinel
+@@ -552,4 +560,21 @@ export default async function (pi) {
+     });
+     console.log(`[Azure Foundry] ✓ Registered ${deployments.length} model(s)`);
+ }
++export default async function (pi) {
++    if (activeProfile() === "work")
++        await registerAzureFoundry(pi);
++    else
++        console.log("[Azure Foundry] Disabled for personal profile");
++    pi.events.on("auth-profile:changed", (event) => {
++        const profile = event?.profile;
++        if (profile === "personal") {
++            pi.unregisterProvider(PROVIDER_ID);
++            providerAuthMap.delete(PROVIDER_ID);
++            console.log("[Azure Foundry] Disabled for personal profile");
++            return;
++        }
++        if (profile === "work")
++            void registerAzureFoundry(pi).catch((error) => console.error("[Azure Foundry]", error));
++    });
++}
+ //# sourceMappingURL=index.js.map
+\ No newline at end of file
