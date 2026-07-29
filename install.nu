@@ -84,6 +84,48 @@ def apply-agent-npm-patches [npm_dir: string, agent_dir: string] {
   do { cd $agent_npm_dir; ^$patch_package --patch-dir $patch_dir_relative --error-on-fail }
 }
 
+def npm-package-name [source: string] {
+  let spec = ($source | str replace --regex '^npm:' '')
+  let parts = ($spec | split row "@")
+
+  if ($spec | str starts-with "@") {
+    $"@($parts | get 1)"
+  } else {
+    $parts | first
+  }
+}
+
+def ensure-agent-npm-packages [agent_dir: string] {
+  let settings_file = ($agent_dir | path join "settings.json")
+  let agent_npm_dir = ($agent_dir | path join "npm")
+  let configured_packages = (open $settings_file | get -o packages | default [])
+
+  print "==> Ensuring all configured Pi-managed npm packages are installed"
+  for configured_package in $configured_packages {
+    let source = if (($configured_package | describe) == "string") {
+      $configured_package
+    } else {
+      $configured_package.source
+    }
+
+    if not ($source | str starts-with "npm:") {
+      continue
+    }
+
+    let package_name = (npm-package-name $source)
+    let package_json = ([$agent_npm_dir "node_modules" ...($package_name | split row "/") "package.json"] | path join)
+
+    if not ($package_json | path exists) {
+      print $"    Installing missing configured package ($source)"
+      ^pi install $source
+    }
+
+    if not ($package_json | path exists) {
+      error make {msg: $"Pi reported that ($source) was installed, but ($package_json) is still missing."}
+    }
+  }
+}
+
 def main [
   --pull(-p)             # Pull this repo before installing.
   --skip-pi-update       # Skip `pi update --extensions`.
@@ -205,6 +247,11 @@ def main [
   } else {
     error make {msg: "pi-vim installed, but patched file clipboard-policy.ts is missing; patch-package did not apply as expected."}
   }
+
+  # `pi update --extensions` deliberately skips pinned npm specs, including
+  # packages which have never been installed. Reconcile missing packages first
+  # so every configured package exists before optional updates and patching.
+  ensure-agent-npm-packages $agent_dir
 
   if not $skip_pi_update {
     print "==> Updating/installing Pi-managed packages from settings"
