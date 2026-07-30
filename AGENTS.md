@@ -1,3 +1,5 @@
+My github usernames are @drew-dirac, @bizmythy
+
 # TypeScript checks and formatting
 
 This repo uses `biome` for TypeScript linting/formatting and `tsgo` for TypeScript type checking.
