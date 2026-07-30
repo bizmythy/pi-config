@@ -1,18 +1,18 @@
 diff --git a/node_modules/pi-web-access/gemini-api.ts b/node_modules/pi-web-access/gemini-api.ts
-index fdb2d07..af1c510 100644
+index 654c182..af1c510 100644
 --- a/node_modules/pi-web-access/gemini-api.ts
 +++ b/node_modules/pi-web-access/gemini-api.ts
 @@ -6,7 +6,7 @@ const DEFAULT_API_HOST = "https://generativelanguage.googleapis.com";
  const API_VERSION = "v1beta";
  export const API_BASE = `${DEFAULT_API_HOST}/${API_VERSION}`;
  const CONFIG_PATH = getWebSearchConfigPath();
--export const DEFAULT_MODEL = "gemini-3-flash-preview";
+-export const DEFAULT_MODEL = "gemini-3.6-flash";
 +export const DEFAULT_MODEL = "gemini-2.5-flash";
  
  interface GeminiApiConfig {
  	geminiApiKey?: unknown;
 diff --git a/node_modules/pi-web-access/video-extract.ts b/node_modules/pi-web-access/video-extract.ts
-index de63ad7..bb78add 100644
+index 71d1257..1a4b9a3 100644
 --- a/node_modules/pi-web-access/video-extract.ts
 +++ b/node_modules/pi-web-access/video-extract.ts
 @@ -32,11 +32,22 @@ const VIDEO_EXTENSIONS: Record<string, string> = {
@@ -44,8 +44,8 @@ index de63ad7..bb78add 100644
  
  const VIDEO_CONFIG_DEFAULTS: VideoConfig = {
  	enabled: true,
--	preferredModel: "gemini-3-flash-preview",
-+	// gemini-3-flash-preview is frequently capacity-limited; 2.5-flash is the stable video path.
+-	preferredModel: "gemini-3.6-flash",
++	// Gemini 3.6 Flash can be capacity-limited; 2.5 Flash is the stable video path.
 +	preferredModel: "gemini-2.5-flash",
  	maxSizeMB: 50,
  };
@@ -96,7 +96,7 @@ index de63ad7..bb78add 100644
  
 +function videoModelsToTry(preferred: string): string[] {
 +	const models = [preferred, ...VIDEO_MODEL_FALLBACKS];
-+	return [...new Set(models.map((m) => m.trim()).filter(Boolean))];
++	return [...new Set(models.map((candidate) => candidate.trim()).filter(Boolean))];
 +}
 +
  async function tryVideoGeminiApi(
@@ -108,7 +108,7 @@ index de63ad7..bb78add 100644
  ): Promise<ExtractedContent | null> {
  	const apiKey = await getApiKey(signal);
  	if (!apiKey) return null;
-@@ -282,22 +306,36 @@ async function tryVideoGeminiApi(
+@@ -282,22 +306,33 @@ async function tryVideoGeminiApi(
  
  		await pollFileState(fileName, apiKey, signal, 120000);
  
@@ -119,7 +119,6 @@ index de63ad7..bb78add 100644
 -			signal,
 -			timeoutMs: 120000,
 -		});
-+		let lastErr: unknown;
 +		for (const candidate of videoModelsToTry(model)) {
 +			if (signal?.aborted) return null;
 +			try {
@@ -138,7 +137,6 @@ index de63ad7..bb78add 100644
 +					error: null,
 +				};
 +			} catch (err) {
-+				lastErr = err;
 +				if (shouldRethrow(err)) throw err;
 +				if (!signal?.aborted) addAttemptError(attemptErrors, `Gemini API (${candidate})`, err);
 +			}
@@ -150,7 +148,6 @@ index de63ad7..bb78add 100644
 -			content: text,
 -			error: null,
 -		};
-+		if (lastErr && shouldRethrow(lastErr)) throw lastErr;
 +		return null;
  	} catch (err) {
  		if (shouldRethrow(err)) throw err;
@@ -159,14 +156,14 @@ index de63ad7..bb78add 100644
  	} finally {
  		if (fileName) deleteGeminiFile(fileName, apiKey);
 diff --git a/node_modules/pi-web-access/youtube-extract.ts b/node_modules/pi-web-access/youtube-extract.ts
-index c9117a2..53ba416 100644
+index 9452700..d61fd46 100644
 --- a/node_modules/pi-web-access/youtube-extract.ts
 +++ b/node_modules/pi-web-access/youtube-extract.ts
 @@ -48,7 +48,7 @@ function normalizeEnabled(value: unknown, fallback: boolean): boolean {
  	return typeof value === "boolean" ? value : fallback;
  }
  
--const defaults: YouTubeConfig = { enabled: true, preferredModel: "gemini-3-flash-preview" };
+-const defaults: YouTubeConfig = { enabled: true, preferredModel: "gemini-3.6-flash" };
 +const defaults: YouTubeConfig = { enabled: true, preferredModel: "gemini-2.5-flash" };
  let cachedConfig: YouTubeConfig | null = null;
  
