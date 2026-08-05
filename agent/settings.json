@@ -17,8 +17,7 @@
       "prompts": []
     },
     "npm:pi-grok-cli@0.3.2",
-    "npm:@nquandt/pi-azure-foundry@1.0.3",
-    "npm:pi-agent-goal"
+    "npm:@nquandt/pi-azure-foundry@1.0.3"
   ],
   "theme": "catppuccin-mocha",
   "hideThinkingBlock": true
