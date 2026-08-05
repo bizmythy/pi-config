@@ -4,8 +4,8 @@
  * pi-subagents package skills and prompt templates are disabled in settings.json
  * package filters, and this extension removes the subagent tool from the active
  * tool set by default. Use /subagents-on (or /subagents-attach) to attach those
- * resources for the current Pi process/session. /subagents-off detaches them by
- * flipping the flag and reloading.
+ * resources for the current Pi process. Attachment survives session replacement
+ * (/new, /resume, /fork, and /plan-implement) until /subagents-off or process exit.
  */
 
 import * as os from "node:os";
@@ -63,14 +63,8 @@ export default async function subagentsToggle(pi: ExtensionAPI): Promise<void> {
     };
   });
 
-  pi.on("session_shutdown", (event) => {
-    // Keep attachment across /reload, but make new/resumed/forked sessions start
-    // from the default detached state.
-    if (event.reason !== "reload") setAttached(false);
-  });
-
   pi.registerCommand("subagents-on", {
-    description: "Attach pi-subagents tools, slash commands, skills, and prompt templates for this session",
+    description: "Attach pi-subagents tools, slash commands, skills, and prompt templates for this Pi process",
     handler: async (_args, ctx) => {
       if (isAttached()) {
         if (ctx.hasUI) ctx.ui.notify("pi-subagents is already attached.", "info");
