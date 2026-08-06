@@ -13,10 +13,12 @@
 # - verifies that Pi can resolve the configured packages
 #
 # Usage:
-#   ./install.nu
-#   ./install.nu --pull              # also git pull --ff-only --autostash first
-#   ./install.nu --skip-pi-update    # do not run `pi update --extensions`
-#   ./install.nu --skip-pi-list      # do not run final `pi list`
+#   ./scripts/install.nu
+#   ./scripts/install.nu --pull              # also git pull --ff-only --autostash first
+#   ./scripts/install.nu --skip-pi-update    # do not run `pi update --extensions`
+#   ./scripts/install.nu --skip-pi-list      # do not run final `pi list`
+
+use utils.nu *
 
 def command-exists [cmd: string] {
   not ((which $cmd) | is-empty)
@@ -35,7 +37,7 @@ def setup-auth-profiles [agent_dir: string] {
   let personal_profile = ($profiles_dir | path join "personal.json")
   let profile_config = ($agent_dir | path join "auth-profiles.json")
 
-  print "==> Configuring independent work/personal Pi login profiles"
+  say "Configuring independent work/personal Pi login profiles"
   mkdir $profiles_dir
 
   if not ($work_profile | path exists) {
@@ -76,11 +78,11 @@ def apply-agent-npm-patches [bun_dir: string, agent_dir: string] {
   }
 
   if not ($patch_dir | path exists) {
-    print $"==> No agent npm patches found: ($patch_dir)"
+    say $"No agent npm patches found: ($patch_dir)"
     return
   }
 
-  print "==> Applying Pi-managed npm package patches"
+  say "Applying Pi-managed npm package patches"
   do { cd $agent_npm_dir; ^bun $patch_package --patch-dir $patch_dir_relative --error-on-fail }
 }
 
@@ -91,7 +93,7 @@ def migrate-agent-packages-to-bun [agent_dir: string] {
   let legacy_lock = ($package_dir | path join "package-lock.json")
 
   if (($package_json | path exists) and not ($bun_lock | path exists)) {
-    print "==> Migrating existing Pi-managed packages to Bun"
+    say "Migrating existing Pi-managed packages to Bun"
     ^bun install --cwd $package_dir --omit=peer
   }
 
@@ -116,7 +118,7 @@ def ensure-agent-npm-packages [agent_dir: string] {
   let agent_npm_dir = ($agent_dir | path join "npm")
   let configured_packages = (open $settings_file | get -o packages | default [])
 
-  print "==> Ensuring all configured Pi-managed npm packages are installed"
+  say "Ensuring all configured Pi-managed npm packages are installed"
   for configured_package in $configured_packages {
     let source = if (($configured_package | describe) == "string") {
       $configured_package
@@ -147,7 +149,9 @@ def main [
   --skip-pi-update       # Skip `pi update --extensions`.
   --skip-pi-list         # Skip final `pi list` verification.
 ] {
-  let repo = ($env.FILE_PWD? | default $env.PWD)
+  let repo = (repo-root)
+  cd $repo
+
   let bun_dir = ($repo | path join "bun")
   let typecheck_dir = ($bun_dir | path join "typecheck")
   let agent_dir = ($repo | path join "agent")
@@ -158,7 +162,7 @@ def main [
   let personal_account = "XH4EFF5WXBGXJOIXZG4PLGILIE"
   let work_account = "MHSAC4QES5HYTEKXKZQN27PFXQ"
 
-  print $"==> Pi config repo: ($repo)"
+  say $"Pi config repo: ($repo)"
 
   if not (($repo | path join "agent" "settings.json") | path exists) {
     error make {msg: $"This does not look like the Pi config repo: missing ($repo | path join 'agent' 'settings.json')"}
@@ -188,20 +192,20 @@ def main [
       error make {msg: $"Cannot --pull because this is not a git checkout: ($repo)"}
     }
 
-    print "==> Updating git checkout"
-    do { cd $repo; ^git pull --ff-only --autostash }
+    say "Updating git checkout"
+    ^git pull --ff-only --autostash
   }
 
   setup-auth-profiles $agent_dir
 
-  print "==> Generating local secret files"
+  say "Generating local secret files"
   ^op --account $personal_account inject --in-file ($secrets_dir | path join "personal.json.tpl") --out-file $personal_secrets --force
   ^op --account $work_account inject --in-file ($secrets_dir | path join "work.json.tpl") --out-file $work_secrets --force
 
   if (linear-authenticated) {
-    print "==> Linear CLI is authenticated"
+    say "Linear CLI is authenticated"
   } else {
-    print "==> Authenticating Linear CLI"
+    say "Authenticating Linear CLI"
     let linear_credential = (open $work_secrets | get linear.credential | into string | str trim)
     if ($linear_credential | is-empty) {
       error make {msg: "The generated work secret file contains an empty Linear CLI credential."}
@@ -214,16 +218,16 @@ def main [
     }
   }
 
-  print "==> Installing Bun dependency workspace and applying patches"
+  say "Installing Bun dependency workspace and applying patches"
   ^bun install --cwd $bun_dir --frozen-lockfile
 
   # Keep the active Pi declarations separate from the locked workspace because
   # their version follows the system Pi installation.
-  let active_pi_version = (^pi --version o+e>| str trim)
-  print $"==> Installing type declarations for Pi ($active_pi_version)"
+  let active_pi_version = (active-pi-version)
+  say $"Installing type declarations for Pi ($active_pi_version)"
   ^bun install $"@earendil-works/pi-coding-agent@($active_pi_version)" --cwd $typecheck_dir --no-save
 
-  let typecheck_pi_package = ($typecheck_dir | path join "node_modules" "@earendil-works" "pi-coding-agent" "package.json")
+  let typecheck_pi_package = (pi-typecheck-package-path $repo)
   if not ($typecheck_pi_package | path exists) {
     error make {msg: $"Pi type-check package was not installed: ($typecheck_pi_package)"}
   }
@@ -232,7 +236,7 @@ def main [
     error make {msg: $"Installed Pi type-check package version (($typecheck_pi_version)) does not match active Pi (($active_pi_version))."}
   }
 
-  print "==> Installing agent extension dependencies with Bun"
+  say "Installing agent extension dependencies with Bun"
   ^bun install --cwd $agent_dir --frozen-lockfile
 
   let required_local_packages = [
@@ -250,7 +254,7 @@ def main [
   }
 
   if (($bun_dir | path join "node_modules" "pi-vim" "clipboard-policy.ts") | path exists) {
-    print "==> Verified patched pi-vim files are present"
+    say "Verified patched pi-vim files are present"
   } else {
     error make {msg: "pi-vim installed, but patched file clipboard-policy.ts is missing; patch-package did not apply as expected."}
   }
@@ -265,16 +269,16 @@ def main [
   ensure-agent-npm-packages $agent_dir
 
   if not $skip_pi_update {
-    print "==> Updating/installing Pi-managed packages from settings"
+    say "Updating/installing Pi-managed packages from settings"
     ^pi update --extensions
   }
 
   apply-agent-npm-patches $bun_dir $agent_dir
 
   if not $skip_pi_list {
-    print "==> Verifying Pi package resolution"
+    say "Verifying Pi package resolution"
     ^pi list
   }
 
-  print "==> Done. Restart Pi to load any newly installed or patched extensions."
+  say "Done. Restart Pi to load any newly installed or patched extensions."
 }

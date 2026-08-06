@@ -4,7 +4,7 @@ My github usernames are @drew-dirac, @bizmythy
 
 This repo uses `biome` for TypeScript linting/formatting and `tsgo` for TypeScript type checking.
 
-Run `./check.nu` after TypeScript changes. It runs Biome with unsafe fixes, then runs `tsgo` over the repo's TypeScript files.
+Run `./scripts/check.nu` after TypeScript changes. It runs Biome with unsafe fixes, then runs `tsgo` over the repo's TypeScript files.
 
 # Guidance
 
