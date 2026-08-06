@@ -4,7 +4,12 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { isolateReviewMessages, parseReviewOutput, renderReviewOutput, resolveReview } from "./review.js";
+import {
+  isolateReviewMessages,
+  parseReviewOutput,
+  renderReviewOutput,
+  resolveReview,
+} from "../../extensions/review/review.js";
 
 function runGit(cwd: string, args: string[]) {
   const result = spawnSync("git", args, { cwd, encoding: "utf8" });

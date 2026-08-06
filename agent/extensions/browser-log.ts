@@ -302,11 +302,22 @@ class CdpClient {
   }
 }
 
-function parseBrowserLogArgs(args: string): BrowserLogOptions {
-  const options: BrowserLogOptions = {
-    cdpUrl: process.env.PI_BROWSER_LOG_CDP_URL ?? DEFAULT_CDP_URL,
-    durationMs: DEFAULT_CAPTURE_DURATION_MS,
+function normalizeBrowserLogOptions(options: Partial<BrowserLogOptions>): BrowserLogOptions {
+  const configuredCdpUrl = options.cdpUrl?.trim() || process.env.PI_BROWSER_LOG_CDP_URL?.trim() || DEFAULT_CDP_URL;
+  const configuredDuration = options.durationMs;
+  const durationMs =
+    typeof configuredDuration === "number" && Number.isFinite(configuredDuration) && configuredDuration >= 0
+      ? Math.min(configuredDuration, MAX_CAPTURE_DURATION_MS)
+      : DEFAULT_CAPTURE_DURATION_MS;
+
+  return {
+    cdpUrl: configuredCdpUrl.replace(/\/+$/, ""),
+    durationMs,
   };
+}
+
+function parseBrowserLogArgs(args: string): BrowserLogOptions {
+  const options = normalizeBrowserLogOptions({});
 
   const tokens = args.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) ?? [];
   for (const rawToken of tokens) {
@@ -341,12 +352,7 @@ function parseBrowserLogArgs(args: string): BrowserLogOptions {
     }
   }
 
-  if (!Number.isFinite(options.durationMs) || options.durationMs < 0) {
-    options.durationMs = DEFAULT_CAPTURE_DURATION_MS;
-  }
-  options.durationMs = Math.min(options.durationMs, MAX_CAPTURE_DURATION_MS);
-  options.cdpUrl = options.cdpUrl.replace(/\/$/, "");
-  return options;
+  return normalizeBrowserLogOptions(options);
 }
 
 async function fetchJson<T>(url: string, signal?: AbortSignal): Promise<T> {
@@ -704,6 +710,18 @@ function resultMessage(filePath: string, report: BrowserLogReport) {
   ].join("\n");
 }
 
+export const _test = {
+  normalizeBrowserLogOptions,
+  parseBrowserLogArgs,
+  isInspectablePage,
+  scoreTarget,
+  formatConsoleArgs,
+  normalizeConsoleEvent,
+  normalizeExceptionEvent,
+  normalizeLogEntry,
+  summarizeEntries,
+};
+
 export default function browserLogExtension(pi: ExtensionAPI) {
   pi.registerCommand("browser-log", {
     description: "Capture console, exception, and browser log entries from the active Chromium tab via CDP",
@@ -730,10 +748,7 @@ export default function browserLogExtension(pi: ExtensionAPI) {
       "Capture console, exception, and browser log entries from the active Chromium tab via Chrome DevTools Protocol and save them to a structured JSON file.",
     parameters: browserLogToolSchema,
     async execute(_toolCallId, params: Partial<BrowserLogOptions>, signal) {
-      const options: BrowserLogOptions = {
-        cdpUrl: (params.cdpUrl ?? process.env.PI_BROWSER_LOG_CDP_URL ?? DEFAULT_CDP_URL).replace(/\/$/, ""),
-        durationMs: Math.min(params.durationMs ?? DEFAULT_CAPTURE_DURATION_MS, MAX_CAPTURE_DURATION_MS),
-      };
+      const options = normalizeBrowserLogOptions(params);
       const { filePath, report } = await captureBrowserLog(options, signal);
       return {
         content: [{ type: "text", text: resultMessage(filePath, report) }],

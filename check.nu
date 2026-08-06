@@ -49,5 +49,5 @@ def main [] {
   do { cd $repo; ^$tsgo -p ($repo | path join "tsconfig.json") }
 
   print "==> Running Bun unit tests"
-  do { cd $repo; ^bun test ./agent/extensions }
+  do { cd $repo; ^bun test ./agent/tests }
 }

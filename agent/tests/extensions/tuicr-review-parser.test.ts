@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { commentLabel } from "./labels.js";
-import { parseTuicrReview } from "./parser.js";
+import { commentLabel } from "../../extensions/tuicr-review/labels.js";
+import { parseTuicrReview } from "../../extensions/tuicr-review/parser.js";
 
 test("parses tuicr comments from Markdown structure rather than physical lines", () => {
   const review = parseTuicrReview(`## Session: diracq/buildos-web@drew-blueport-deck-capture/commits/b23e0a6..7840727
