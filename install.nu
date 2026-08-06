@@ -3,10 +3,10 @@
 # Bootstrap this Pi configuration on a new machine.
 #
 # What this does:
-# - installs the local npm workspace under ./npm
-# - applies patch-package patches from ./patches via npm postinstall
+# - installs the local Bun dependency workspace under ./bun
+# - applies patch-package patches from ./patches via Bun's postinstall
 # - applies patch-package patches from ./agent/patches to Pi-managed npm packages
-# - updates/installs Pi-managed npm packages from agent/settings.json
+# - updates/installs Pi-managed npm packages with Bun from agent/settings.json
 # - creates isolated work/personal Pi login profiles (existing logins become personal; work uses Azure)
 # - generates local secret files from the committed 1Password templates
 # - verifies that the Linear CLI is authenticated
@@ -65,8 +65,8 @@ def setup-auth-profiles [agent_dir: string] {
   }
 }
 
-def apply-agent-npm-patches [npm_dir: string, agent_dir: string] {
-  let patch_package = ($npm_dir | path join "node_modules" ".bin" "patch-package")
+def apply-agent-npm-patches [bun_dir: string, agent_dir: string] {
+  let patch_package = ($bun_dir | path join "node_modules" ".bin" "patch-package")
   let patch_dir = ($agent_dir | path join "patches")
   let patch_dir_relative = "../patches"
   let agent_npm_dir = ($agent_dir | path join "npm")
@@ -81,7 +81,23 @@ def apply-agent-npm-patches [npm_dir: string, agent_dir: string] {
   }
 
   print "==> Applying Pi-managed npm package patches"
-  do { cd $agent_npm_dir; ^$patch_package --patch-dir $patch_dir_relative --error-on-fail }
+  do { cd $agent_npm_dir; ^bun $patch_package --patch-dir $patch_dir_relative --error-on-fail }
+}
+
+def migrate-agent-packages-to-bun [agent_dir: string] {
+  let package_dir = ($agent_dir | path join "npm")
+  let package_json = ($package_dir | path join "package.json")
+  let bun_lock = ($package_dir | path join "bun.lock")
+  let legacy_lock = ($package_dir | path join "package-lock.json")
+
+  if (($package_json | path exists) and not ($bun_lock | path exists)) {
+    print "==> Migrating existing Pi-managed packages to Bun"
+    ^bun install --cwd $package_dir --omit=peer
+  }
+
+  if ($legacy_lock | path exists) {
+    rm $legacy_lock
+  }
 }
 
 def npm-package-name [source: string] {
@@ -132,10 +148,9 @@ def main [
   --skip-pi-list         # Skip final `pi list` verification.
 ] {
   let repo = ($env.FILE_PWD? | default $env.PWD)
-  let npm_dir = ($repo | path join "npm")
-  let typecheck_dir = ($npm_dir | path join "typecheck")
+  let bun_dir = ($repo | path join "bun")
+  let typecheck_dir = ($bun_dir | path join "typecheck")
   let agent_dir = ($repo | path join "agent")
-  let cache_dir = ($repo | path join "npm-cache")
   let secrets_dir = ($repo | path join "secrets")
   let personal_secrets = ($secrets_dir | path join "personal.json")
   let work_secrets = ($secrets_dir | path join "work.json")
@@ -149,15 +164,15 @@ def main [
     error make {msg: $"This does not look like the Pi config repo: missing ($repo | path join 'agent' 'settings.json')"}
   }
 
-  if not ($npm_dir | path exists) {
-    error make {msg: $"Missing npm workspace: ($npm_dir)"}
+  if not ($bun_dir | path exists) {
+    error make {msg: $"Missing Bun dependency workspace: ($bun_dir)"}
   }
 
   if not (($agent_dir | path join "package.json") | path exists) {
-    error make {msg: $"Missing agent npm package manifest: ($agent_dir | path join 'package.json')"}
+    error make {msg: $"Missing agent package manifest: ($agent_dir | path join 'package.json')"}
   }
 
-  let required_commands = ["pi-npm", "pi", "linear", "op"]
+  let required_commands = ["bun", "pi", "linear", "op"]
   for cmd in $required_commands {
     if not (command-exists $cmd) {
       error make {msg: $"Missing required command `($cmd)`. Install/start Pi first so its commands are available."}
@@ -199,20 +214,14 @@ def main [
     }
   }
 
-  mkdir $cache_dir
+  print "==> Installing Bun dependency workspace and applying patches"
+  ^bun install --cwd $bun_dir --frozen-lockfile
 
-  print "==> Installing local npm workspace and applying patches"
-  with-env {npm_config_cache: $cache_dir} {
-    do { cd $npm_dir; ^pi-npm install --include=dev }
-  }
-
-  # Keep these separate from the locked workspace. Asking npm to replace a
-  # locked package in-place triggers an npm 11 Arborist rollback bug on reruns.
+  # Keep the active Pi declarations separate from the locked workspace because
+  # their version follows the system Pi installation.
   let active_pi_version = (^pi --version o+e>| str trim)
   print $"==> Installing type declarations for Pi ($active_pi_version)"
-  with-env {npm_config_cache: $cache_dir} {
-    ^pi-npm --prefix $typecheck_dir install --no-save $"@earendil-works/pi-coding-agent@($active_pi_version)"
-  }
+  ^bun install $"@earendil-works/pi-coding-agent@($active_pi_version)" --cwd $typecheck_dir --no-save
 
   let typecheck_pi_package = ($typecheck_dir | path join "node_modules" "@earendil-works" "pi-coding-agent" "package.json")
   if not ($typecheck_pi_package | path exists) {
@@ -223,13 +232,11 @@ def main [
     error make {msg: $"Installed Pi type-check package version (($typecheck_pi_version)) does not match active Pi (($active_pi_version))."}
   }
 
-  print "==> Installing agent extension npm workspace"
-  with-env {npm_config_cache: $cache_dir} {
-    ^pi-npm --prefix $agent_dir install
-  }
+  print "==> Installing agent extension dependencies with Bun"
+  ^bun install --cwd $agent_dir --frozen-lockfile
 
   let required_local_packages = [
-    ($npm_dir | path join "node_modules" "pi-vim"),
+    ($bun_dir | path join "node_modules" "pi-vim"),
     ($agent_dir | path join "node_modules" "qrcode"),
     ($agent_dir | path join "node_modules" "remark-parse"),
     ($agent_dir | path join "node_modules" "unified"),
@@ -242,11 +249,15 @@ def main [
     }
   }
 
-  if (($npm_dir | path join "node_modules" "pi-vim" "clipboard-policy.ts") | path exists) {
+  if (($bun_dir | path join "node_modules" "pi-vim" "clipboard-policy.ts") | path exists) {
     print "==> Verified patched pi-vim files are present"
   } else {
     error make {msg: "pi-vim installed, but patched file clipboard-policy.ts is missing; patch-package did not apply as expected."}
   }
+
+  # Pi always stores registry packages under agent/npm, regardless of which
+  # package manager installs them. Convert installations left by older setups.
+  migrate-agent-packages-to-bun $agent_dir
 
   # `pi update --extensions` deliberately skips pinned npm specs, including
   # packages which have never been installed. Reconcile missing packages first
@@ -258,7 +269,7 @@ def main [
     ^pi update --extensions
   }
 
-  apply-agent-npm-patches $npm_dir $agent_dir
+  apply-agent-npm-patches $bun_dir $agent_dir
 
   if not $skip_pi_list {
     print "==> Verifying Pi package resolution"

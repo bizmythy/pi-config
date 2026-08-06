@@ -6,10 +6,10 @@
 
 def main [] {
   let repo = ($env.FILE_PWD? | default $env.PWD)
-  let npm_dir = ($repo | path join "npm")
-  let typecheck_dir = ($npm_dir | path join "typecheck" "node_modules")
-  let biome = ($npm_dir | path join "node_modules" ".bin" "biome")
-  let tsgo = ($npm_dir | path join "node_modules" ".bin" "tsgo")
+  let bun_dir = ($repo | path join "bun")
+  let typecheck_dir = ($bun_dir | path join "typecheck" "node_modules")
+  let biome = ($bun_dir | path join "node_modules" ".bin" "biome")
+  let tsgo = ($bun_dir | path join "node_modules" ".bin" "tsgo")
 
   if not ($biome | path exists) {
     error make {msg: $"Missing Biome binary: ($biome). Run ./install.nu first."}
@@ -21,7 +21,7 @@ def main [] {
 
   let typecheck_pi_package = ($typecheck_dir | path join "@earendil-works" "pi-coding-agent" "package.json")
   let typecheck_pi_types = ($typecheck_dir | path join "@earendil-works" "pi-coding-agent" "dist" "index.d.ts")
-  let typecheck_tui_types = ($typecheck_dir | path join "@earendil-works" "pi-coding-agent" "node_modules" "@earendil-works" "pi-tui" "dist" "index.d.ts")
+  let typecheck_tui_types = ($typecheck_dir | path join "@earendil-works" "pi-tui" "dist" "index.d.ts")
 
   for type_file in [$typecheck_pi_types $typecheck_tui_types] {
     if not ($type_file | path exists) {
@@ -35,7 +35,7 @@ def main [] {
     error make {msg: $"Active pi version (($active_pi_version)) does not match installed type-check package version (($typecheck_pi_version)). Run ./install.nu to synchronize it."}
   }
 
-  let ts_files = (do { cd $repo; glob "**/*.ts" --exclude ["npm/**" "npm-cache/**" ".git/**" ".pi/**" "agent/git/**" "agent/sessions/**"] | sort })
+  let ts_files = (do { cd $repo; glob "**/*.ts" --exclude ["bun/**" ".git/**" ".pi/**" "agent/git/**" "agent/sessions/**"] | sort })
 
   if ($ts_files | is-empty) {
     print "==> No TypeScript files found."

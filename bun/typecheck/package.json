@@ -1,0 +1,5 @@
+{
+  "name": "pi-typecheck-dependencies",
+  "private": true,
+  "packageManager": "bun@1.3.13"
+}

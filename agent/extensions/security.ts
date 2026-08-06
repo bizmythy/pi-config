@@ -230,6 +230,7 @@ export default function (pi: ExtensionAPI) {
   ];
 
   const softProtectedPaths = [
+    { pattern: /bun\.lockb?$/, desc: "Bun lockfile" },
     { pattern: /package-lock\.json$/, desc: "package-lock.json" },
     { pattern: /yarn\.lock$/, desc: "yarn.lock" },
     { pattern: /pnpm-lock\.yaml$/, desc: "pnpm-lock.yaml" },

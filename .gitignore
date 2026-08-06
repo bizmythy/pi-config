@@ -21,14 +21,13 @@ exa-usage.json
 __pycache__/
 *.py[cod]
 
-# Pi package install/cache directories.
-npm/*
-!npm/package.json
-!npm/package-lock.json
-!npm/typecheck/
-npm/typecheck/*
-!npm/typecheck/package.json
-npm-cache/
+# Bun dependency install directories.
+bun/*
+!bun/package.json
+!bun/bun.lock
+!bun/typecheck/
+bun/typecheck/*
+!bun/typecheck/package.json
 agent/git/
 agent/node_modules/
 agent/prompt-history.json

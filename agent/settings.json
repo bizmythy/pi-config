@@ -4,13 +4,13 @@
   "defaultModel": "gpt-5.6-sol",
   "extensions": [],
   "npmCommand": [
-    "pi-npm"
+    "bun"
   ],
   "defaultThinkingLevel": "high",
   "packages": [
     "npm:pi-web-access",
     "npm:pi-ask-user",
-    "../npm/node_modules/pi-vim",
+    "../bun/node_modules/pi-vim",
     {
       "source": "npm:pi-subagents",
       "skills": [],

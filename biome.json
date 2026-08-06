@@ -9,8 +9,7 @@
     "ignoreUnknown": true,
     "includes": [
       "**/*.ts",
-      "!npm/**",
-      "!npm-cache/**",
+      "!bun/**",
       "!.git/**",
       "!.pi/**",
       "!agent/git/**",
