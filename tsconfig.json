@@ -9,7 +9,7 @@
     "noEmit": true,
     "skipLibCheck": true,
     "typeRoots": ["./bun/node_modules/@types"],
-    "types": ["node"],
+    "types": ["node", "bun"],
     "paths": {
       "@earendil-works/pi-coding-agent": [
         "./bun/typecheck/node_modules/@earendil-works/pi-coding-agent/dist/index.d.ts"

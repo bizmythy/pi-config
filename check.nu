@@ -1,6 +1,6 @@
 #!/usr/bin/env nu
 
-# Format/lint and type-check the TypeScript in this repo.
+# Format/lint, type-check, and test the TypeScript in this repo.
 # Run from anywhere with:
 #   ./check.nu
 
@@ -47,4 +47,7 @@ def main [] {
 
   print "==> Running tsgo"
   do { cd $repo; ^$tsgo -p ($repo | path join "tsconfig.json") }
+
+  print "==> Running Bun unit tests"
+  do { cd $repo; ^bun test ./agent/extensions }
 }
