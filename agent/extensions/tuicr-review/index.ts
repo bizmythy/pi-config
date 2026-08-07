@@ -168,11 +168,11 @@ export default function tuicrReviewExtension(pi: ExtensionAPI) {
 
   const runRound = async (ctx: ExtensionCommandContext) => {
     if (!state) {
-      ctx.ui.notify("No active tuicr review. Run /tuicr-parse first.", "warning");
+      ctx.ui.notify("No active tuicr review. Run /tuicr parse first.", "warning");
       return;
     }
     if (!ctx.isIdle()) {
-      ctx.ui.notify("Wait for the current agent turn to finish, then run /tuicr-resume.", "warning");
+      ctx.ui.notify("Wait for the current agent turn to finish, then run /tuicr resume.", "warning");
       return;
     }
 
@@ -204,49 +204,68 @@ export default function tuicrReviewExtension(pi: ExtensionAPI) {
     updateStatus(ctx);
   };
 
-  pi.registerCommand("tuicr-parse", {
-    description: "Parse a tuicr markdown review from a file or wl-paste and select comments to address",
+  const parseReview = async (argument: string, ctx: ExtensionCommandContext) => {
+    if (!ctx.isIdle()) {
+      ctx.ui.notify("Wait for the current agent turn to finish before parsing a review.", "warning");
+      return;
+    }
+
+    try {
+      let markdown: string;
+      let source: string;
+      if (argument.trim()) {
+        source = resolveReviewPath(argument, ctx.cwd);
+        markdown = await readFile(source, "utf8");
+      } else {
+        const result = await pi.exec("wl-paste", ["--no-newline"]);
+        if (result.code !== 0) {
+          throw new Error(result.stderr.trim() || `wl-paste exited with status ${result.code}`);
+        }
+        markdown = result.stdout;
+        source = "Wayland clipboard";
+      }
+
+      const review = parseTuicrReview(markdown);
+      if (review.comments.length === 0) {
+        throw new Error("No tuicr comments were found in the markdown.");
+      }
+
+      state = { review, addressedIds: [], source };
+      persist();
+      updateStatus(ctx);
+      ctx.ui.notify(`Parsed ${review.comments.length} comments from ${source}.`, "info");
+      await runRound(ctx);
+    } catch (error) {
+      ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
+    }
+  };
+
+  pi.registerCommand("tuicr", {
+    description: "Parse a tuicr review or resume selecting comments from the active review",
+    getArgumentCompletions: (prefix) => {
+      if (/\s/.test(prefix)) return null;
+      const subcommands = [
+        { value: "parse", label: "parse", description: "Parse a review from a file or wl-paste" },
+        { value: "resume", label: "resume", description: "Select more unaddressed comments" },
+      ];
+      const matches = subcommands.filter((item) => item.value.startsWith(prefix));
+      return matches.length > 0 ? matches : null;
+    },
     handler: async (args, ctx) => {
-      if (!ctx.isIdle()) {
-        ctx.ui.notify("Wait for the current agent turn to finish before parsing a review.", "warning");
+      const match = args.trim().match(/^(\S+)(?:\s+([\s\S]*))?$/);
+      const subcommand = match?.[1]?.toLowerCase();
+      const argument = match?.[2] ?? "";
+
+      if (subcommand === "parse") {
+        await parseReview(argument, ctx);
+        return;
+      }
+      if (subcommand === "resume" && !argument.trim()) {
+        await runRound(ctx);
         return;
       }
 
-      try {
-        let markdown: string;
-        let source: string;
-        if (args.trim()) {
-          source = resolveReviewPath(args, ctx.cwd);
-          markdown = await readFile(source, "utf8");
-        } else {
-          const result = await pi.exec("wl-paste", ["--no-newline"]);
-          if (result.code !== 0) {
-            throw new Error(result.stderr.trim() || `wl-paste exited with status ${result.code}`);
-          }
-          markdown = result.stdout;
-          source = "Wayland clipboard";
-        }
-
-        const review = parseTuicrReview(markdown);
-        if (review.comments.length === 0) {
-          throw new Error("No tuicr comments were found in the markdown.");
-        }
-
-        state = { review, addressedIds: [], source };
-        persist();
-        updateStatus(ctx);
-        ctx.ui.notify(`Parsed ${review.comments.length} comments from ${source}.`, "info");
-        await runRound(ctx);
-      } catch (error) {
-        ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
-      }
-    },
-  });
-
-  pi.registerCommand("tuicr-resume", {
-    description: "Select more unaddressed comments from the active tuicr review",
-    handler: async (_args, ctx) => {
-      await runRound(ctx);
+      ctx.ui.notify("Usage: /tuicr <parse [review-file]|resume>", "warning");
     },
   });
 
