@@ -3,13 +3,13 @@ import { dirname, join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { SettingsManager } from "@earendil-works/pi-coding-agent";
 
-type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
 type LocalPiSettings = {
   defaultThinkingLevel?: ThinkingLevel;
 };
 
-const validThinkingLevels = new Set(["off", "minimal", "low", "medium", "high", "xhigh"]);
+const validThinkingLevels = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 const patchMarker = Symbol.for("pi.local-thinking-level.patch-installed");
 
 function getAgentDir(): string {
