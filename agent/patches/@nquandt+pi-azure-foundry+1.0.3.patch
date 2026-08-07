@@ -1,5 +1,5 @@
 diff --git a/node_modules/@nquandt/pi-azure-foundry/dist/index.js b/node_modules/@nquandt/pi-azure-foundry/dist/index.js
-index 0ce15dd..4140850 100644
+index 0ce15dd..e2926e5 100644
 --- a/node_modules/@nquandt/pi-azure-foundry/dist/index.js
 +++ b/node_modules/@nquandt/pi-azure-foundry/dist/index.js
 @@ -1,8 +1,10 @@
@@ -13,9 +13,19 @@ index 0ce15dd..4140850 100644
  // =============================================================================
  // Token Provider
  // =============================================================================
-@@ -50,11 +52,17 @@ function loadConfig() {
+@@ -49,12 +51,27 @@ function loadConfig() {
+         candidates.map((p) => `  ${p}`).join("\n") +
          `\n\nCreate one in your project root or at ~/.pi/azure-foundry.config.json`);
  }
++const GPT_56_THINKING_LEVEL_MAP = {
++    off: "none",
++    minimal: null,
++    low: "low",
++    medium: "medium",
++    high: "high",
++    xhigh: "xhigh",
++    max: "max",
++};
  const MODEL_DEFAULTS = {
 +    "claude-fable-5": { contextWindow: 1000000, maxTokens: 128000, reasoning: true, input: ["text", "image"] },
 +    "claude-opus-5": { contextWindow: 1000000, maxTokens: 128000, reasoning: true, input: ["text", "image"] },
@@ -24,14 +34,22 @@ index 0ce15dd..4140850 100644
      "claude-haiku-4-5": { contextWindow: 200000, maxTokens: 16384, reasoning: false, input: ["text", "image"] },
      "claude-opus-4-5": { contextWindow: 200000, maxTokens: 32000, reasoning: true, input: ["text", "image"] },
      "gpt-5.4-nano": { contextWindow: 128000, maxTokens: 16384, reasoning: false, input: ["text", "image"], openaiTokenLimit: "max_completion_tokens" },
-+    "gpt-5.6": { contextWindow: 272000, maxTokens: 128000, reasoning: true, input: ["text", "image"], openaiTokenLimit: "max_completion_tokens" },
-+    "gpt-5.6-sol": { contextWindow: 272000, maxTokens: 128000, reasoning: true, input: ["text", "image"], openaiTokenLimit: "max_completion_tokens" },
-+    "gpt-5.6-terra": { contextWindow: 272000, maxTokens: 128000, reasoning: true, input: ["text", "image"], openaiTokenLimit: "max_completion_tokens" },
-+    "gpt-5.6-luna": { contextWindow: 272000, maxTokens: 128000, reasoning: true, input: ["text", "image"], openaiTokenLimit: "max_completion_tokens" },
++    "gpt-5.6": { contextWindow: 272000, maxTokens: 128000, reasoning: true, input: ["text", "image"], openaiTokenLimit: "max_completion_tokens", thinkingLevelMap: GPT_56_THINKING_LEVEL_MAP },
++    "gpt-5.6-sol": { contextWindow: 272000, maxTokens: 128000, reasoning: true, input: ["text", "image"], openaiTokenLimit: "max_completion_tokens", thinkingLevelMap: GPT_56_THINKING_LEVEL_MAP },
++    "gpt-5.6-terra": { contextWindow: 272000, maxTokens: 128000, reasoning: true, input: ["text", "image"], openaiTokenLimit: "max_completion_tokens", thinkingLevelMap: GPT_56_THINKING_LEVEL_MAP },
++    "gpt-5.6-luna": { contextWindow: 272000, maxTokens: 128000, reasoning: true, input: ["text", "image"], openaiTokenLimit: "max_completion_tokens", thinkingLevelMap: GPT_56_THINKING_LEVEL_MAP },
      "gpt-4o": { contextWindow: 128000, maxTokens: 4096, reasoning: false, input: ["text", "image"] },
      "gpt-4o-mini": { contextWindow: 128000, maxTokens: 4096, reasoning: false, input: ["text", "image"] },
      "Kimi-K2.5": { contextWindow: 131072, maxTokens: 8192, reasoning: false, input: ["text"] },
-@@ -479,17 +487,43 @@ function streamAzureFoundry(model, context, options) {
+@@ -91,6 +108,7 @@ function deploymentToModel(d) {
+         id: d.name,
+         name: d.modelName ?? d.name,
+         reasoning: defaults.reasoning,
++        thinkingLevelMap: defaults.thinkingLevelMap,
+         input: defaults.input,
+         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+         contextWindow: defaults.contextWindow,
+@@ -479,17 +497,43 @@ function streamAzureFoundry(model, context, options) {
              timestamp: Date.now(),
          };
          try {
@@ -81,7 +99,7 @@ index 0ce15dd..4140850 100644
              stream.push({ type: "done", reason: output.stopReason, message: output });
              stream.end();
          }
-@@ -505,7 +539,15 @@ function streamAzureFoundry(model, context, options) {
+@@ -505,7 +549,15 @@ function streamAzureFoundry(model, context, options) {
  // =============================================================================
  // Extension Entry Point
  // =============================================================================
@@ -98,7 +116,7 @@ index 0ce15dd..4140850 100644
      const config = loadConfig();
      const endpoint = `https://${config.resourceId}.services.ai.azure.com/api/projects/${config.projectId}`;
      // Discover deployments
-@@ -536,10 +578,9 @@ export default async function (pi) {
+@@ -536,10 +588,9 @@ export default async function (pi) {
          const route = apiRouteMap.get(d.name);
          console.log(`[Azure Foundry] ${d.name}: no explicit defaults for "${modelName}" — using ${describeApiRoute(route)}`);
      }
@@ -111,7 +129,7 @@ index 0ce15dd..4140850 100644
          name: "Azure Foundry",
          baseUrl: endpoint,
          // For api-key auth, store the real key. For azure-identity, pass a sentinel
-@@ -552,4 +593,21 @@ export default async function (pi) {
+@@ -552,4 +603,21 @@ export default async function (pi) {
      });
      console.log(`[Azure Foundry] ✓ Registered ${deployments.length} model(s)`);
  }
