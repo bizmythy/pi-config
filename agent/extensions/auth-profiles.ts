@@ -4,6 +4,17 @@ import type { ExtensionAPI, ExtensionContext, ModelRegistry } from "@earendil-wo
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 
 const PROFILE_NAMES = ["work", "personal"] as const;
+const BEDROCK_AUTH_ENV_VARS = [
+  "AWS_PROFILE",
+  "AWS_DEFAULT_PROFILE",
+  "AWS_ACCESS_KEY_ID",
+  "AWS_SECRET_ACCESS_KEY",
+  "AWS_SESSION_TOKEN",
+  "AWS_BEARER_TOKEN_BEDROCK",
+  "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+  "AWS_CONTAINER_CREDENTIALS_FULL_URI",
+  "AWS_WEB_IDENTITY_TOKEN_FILE",
+] as const;
 type ProfileName = (typeof PROFILE_NAMES)[number];
 
 type AuthStorageInternals = {
@@ -96,12 +107,32 @@ async function closeProviderSessions(): Promise<void> {
   }
 }
 
+async function withBedrockAuthHidden<T>(operation: () => Promise<T>): Promise<T> {
+  const previousValues = new Map<string, string | undefined>();
+  for (const name of BEDROCK_AUTH_ENV_VARS) {
+    previousValues.set(name, process.env[name]);
+    delete process.env[name];
+  }
+
+  try {
+    return await operation();
+  } finally {
+    for (const [name, value] of previousValues) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
+}
+
 async function bindProfile(registry: ModelRegistry, profile: ProfileName): Promise<void> {
   const authStorage = getAuthStorage(registry);
   authStorage.storage.authPath = profileAuthPath(profile);
   authStorage.reload();
   await closeProviderSessions();
-  await registry.refresh();
+  // Project extensions may restore ambient AWS credentials before this handler
+  // runs. Hide only Bedrock's auth signals while Pi rebuilds the model registry,
+  // then restore them for shell tools and AWS CLI commands.
+  await withBedrockAuthHidden(() => registry.refresh());
 }
 
 async function providersFor(profile: ProfileName): Promise<string[]> {
@@ -172,3 +203,5 @@ export default function authProfiles(pi: ExtensionAPI) {
     },
   });
 }
+
+export const _test = { withBedrockAuthHidden };
