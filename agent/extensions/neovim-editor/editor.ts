@@ -9,6 +9,7 @@ import {
   visibleWidth,
 } from "@earendil-works/pi-tui";
 import { PiAutocompleteController } from "./autocomplete";
+import { releaseGlobalDebugHandler } from "./debug-key";
 import { PromptHistory } from "./history";
 import { NeovimInputParser, toNeovimInput } from "./input";
 import { modeLabel } from "./mode";
@@ -52,6 +53,7 @@ export class NeovimEditor implements EditorComponent {
   private lastNotifiedText = "";
   private preserveHistoryNavigation = false;
   private readonly previousHardwareCursor: boolean;
+  private readonly restoreDebugHandler: () => void;
   private lastCursorShape?: string;
 
   constructor(
@@ -62,6 +64,9 @@ export class NeovimEditor implements EditorComponent {
   ) {
     this.borderColor = theme.borderColor;
     this.previousHardwareCursor = tui.getShowHardwareCursor();
+    // Pi TUI reserves Ctrl+Shift+D for debug logging before focused components
+    // receive input. Release it so the configured app.exit binding can route here.
+    this.restoreDebugHandler = releaseGlobalDebugHandler(tui);
     tui.setShowHardwareCursor(true);
     this.history = options.history ?? new PromptHistory();
     this.host = this.createHost("");
@@ -93,6 +98,9 @@ export class NeovimEditor implements EditorComponent {
         this.tui.requestRender();
       },
       onSubmit: () => this.submit(),
+      onRequestExit: () => {
+        if (!this.disposed) this.requestAppExit();
+      },
       onError: (message) => {
         this.error = message;
         this.options.notify(message, "error");
@@ -291,11 +299,7 @@ export class NeovimEditor implements EditorComponent {
       }
     }
     if (this.explicitMatches(data, "app.exit") && this.getText().length === 0) {
-      const handler = this.onCtrlD ?? this.actionHandlers.get("app.exit");
-      if (handler) {
-        handler();
-        return;
-      }
+      if (this.requestAppExit()) return;
     }
     if (this.explicitMatches(data, "tui.editor.historyPrevious")) {
       this.navigateHistory("previous");
@@ -330,6 +334,13 @@ export class NeovimEditor implements EditorComponent {
     return normalizeKeys(binding).some((key) => matchesKey(data, key));
   }
 
+  private requestAppExit(): boolean {
+    const handler = this.onCtrlD ?? this.actionHandlers.get("app.exit");
+    if (!handler) return false;
+    handler();
+    return true;
+  }
+
   private navigateHistory(direction: "previous" | "next"): void {
     const value = this.history.navigate(direction, this.getText());
     if (value === undefined) return;
@@ -356,5 +367,6 @@ export class NeovimEditor implements EditorComponent {
     await this.host.dispose();
     this.tui.terminal.write("\x1b[0 q");
     this.tui.setShowHardwareCursor(this.previousHardwareCursor);
+    this.restoreDebugHandler();
   }
 }

@@ -17,6 +17,7 @@ export interface NeovimHostOptions {
   args?: string[];
   onState: (state: NeovimEditorState) => void;
   onSubmit: () => void;
+  onRequestExit: () => void;
   onError: (message: string) => void;
   onExit: (unexpected: boolean, message?: string) => void;
   onRender: () => void;
@@ -135,6 +136,7 @@ export class NeovimHost {
   private operation = Promise.resolve();
   private syncScheduled = false;
   private stderrTail = "";
+  private exitRequested = false;
 
   constructor(private readonly options: NeovimHostOptions) {
     const lines = (options.initialText ?? "").split("\n");
@@ -183,8 +185,9 @@ export class NeovimHost {
       child.once("exit", (code, signal) => {
         this.ready = false;
         this.rpc?.close();
+        if (!this.disposing && !this.exitRequested && code === 0 && signal === null) this.requestExit();
         const detail = this.stderrTail.trim() || `Neovim exited (${signal ?? code ?? "unknown status"})`;
-        this.options.onExit(!this.disposing, detail);
+        this.options.onExit(!this.disposing && !this.exitRequested, detail);
       });
 
       const rpc = new NeovimRpc(child, (method, args) => this.handleNotification(method, args));
@@ -213,7 +216,14 @@ export class NeovimHost {
       return;
     }
     if (method === "pi_submit") this.options.onSubmit();
+    if (method === "pi_exit") this.requestExit();
     if (method === "pi_state_dirty") this.scheduleStateSync();
+  }
+
+  private requestExit(): void {
+    if (this.disposing || this.exitRequested) return;
+    this.exitRequested = true;
+    this.options.onRequestExit();
   }
 
   private fail(message: string): void {

@@ -17,6 +17,7 @@ test("a real embedded Neovim owns editing, state synchronization, and shutdown",
   if (!Bun.which("nvim")) return;
 
   let latestText = "";
+  let exitRequests = 0;
   const errors: string[] = [];
   const host = new NeovimHost({
     cwd: process.cwd(),
@@ -25,6 +26,9 @@ test("a real embedded Neovim owns editing, state synchronization, and shutdown",
       latestText = state.lines.join("\n");
     },
     onSubmit: () => undefined,
+    onRequestExit: () => {
+      exitRequests += 1;
+    },
     onError: (message) => errors.push(message),
     onExit: () => undefined,
     onRender: () => undefined,
@@ -67,6 +71,37 @@ test("a real embedded Neovim owns editing, state synchronization, and shutdown",
     host.sendKeys("<Esc>");
 
     expect(errors).toEqual([]);
+  } finally {
+    await host.dispose();
+  }
+  expect(exitRequests).toBe(0);
+});
+
+test("Neovim :q requests Pi exit instead of reporting an unexpected child exit", async () => {
+  if (!Bun.which("nvim")) return;
+
+  let exitRequests = 0;
+  const childExits: boolean[] = [];
+  const host = new NeovimHost({
+    cwd: process.cwd(),
+    args: ["--clean", "--embed"],
+    onState: () => undefined,
+    onSubmit: () => undefined,
+    onRequestExit: () => {
+      exitRequests += 1;
+    },
+    onError: () => undefined,
+    onExit: (unexpected) => childExits.push(unexpected),
+    onRender: () => undefined,
+  });
+
+  try {
+    await host.start(40, 6);
+    host.sendKeys(":q<CR>");
+    await waitFor(() => childExits.length === 1);
+
+    expect(exitRequests).toBe(1);
+    expect(childExits).toEqual([false]);
   } finally {
     await host.dispose();
   }

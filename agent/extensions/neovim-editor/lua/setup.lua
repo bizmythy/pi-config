@@ -28,5 +28,12 @@ vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI", "CursorMoved", "Cur
     vim.rpcnotify(channel, "pi_state_dirty")
   end,
 })
+vim.api.nvim_create_autocmd("VimLeavePre", {
+  group = group,
+  once = true,
+  callback = function()
+    vim.rpcnotify(channel, "pi_exit")
+  end,
+})
 
 return buffer

@@ -14,21 +14,11 @@ If startup fails, fix the reported Neovim/configuration error and run `/reload`.
 
 ## Submitting and editing
 
-- **Ctrl+Enter** submits the prompt to Pi.
-- **Ctrl+Shift+Enter** queues a follow-up prompt while Pi is working.
 - `:PiSubmit` submits from Neovim command-line mode.
-- Ordinary Enter is passed to Neovim, so it inserts a line in Insert mode and executes native command-line prompts normally.
-- Pi autocomplete remains available for `/`, slash-command arguments, `@`, extension trigger characters such as `#`, and Tab-forced path completion. Its list is rendered below the Neovim grid.
-- Ctrl+Up and Ctrl+Down navigate persistent prompt history. Plain arrows remain Neovim input when autocomplete is closed.
-- Clipboard image insertion uses Ctrl+Shift+V. Native Ctrl+V remains available for Visual Block mode.
-
-## Key ownership
-
-`agent/keybindings.json` is the only repository source of raw Pi-owned key values. The embedded editor intercepts a built-in action only when that action appears explicitly in this file. All other input is sent to Neovim.
-
-To return a key to Neovim, remove or empty its Pi action in `agent/keybindings.json`, then run `/reload`. Do not add matching Neovim mappings in this extension. Extension shortcuts, including resume-after-interrupt, also read their value from the same file.
-
-Autocomplete selection keys are contextual: they belong to Pi while Pi's completion list is visible and otherwise go to Neovim.
+- Neovim `:q` exits Pi, rather than restarting the embedded Neovim process.
+- Ordinary editor input is passed to Neovim unless its configured action is explicitly owned by Pi.
+- Pi autocomplete remains available for slash commands, command arguments, attachments, extension trigger characters, and forced path completion. Its list is rendered below the Neovim grid.
+- Persistent prompt history and clipboard image insertion continue to operate on the Neovim prompt buffer.
 
 ## History and programmatic edits
 
