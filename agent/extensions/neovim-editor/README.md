@@ -14,6 +14,7 @@ If startup fails, fix the reported Neovim/configuration error and run `/reload`.
 ## Submitting and editing
 
 - **Ctrl+Enter** submits the prompt to Pi.
+- **Ctrl+Shift+Enter** queues a follow-up prompt while Pi is working.
 - `:PiSubmit` submits from Neovim command-line mode.
 - Ordinary Enter is passed to Neovim, so it inserts a line in Insert mode and executes native command-line prompts normally.
 - Pi autocomplete remains available for `/`, slash-command arguments, `@`, extension trigger characters such as `#`, and Tab-forced path completion. Its list is rendered below the Neovim grid.

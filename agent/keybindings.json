@@ -12,7 +12,7 @@
   "app.session.toggleNamedFilter": "ctrl+shift+n",
   "app.editor.external": "ctrl+g",
   "app.message.copy": "ctrl+x",
-  "app.message.followUp": "alt+enter",
+  "app.message.followUp": "ctrl+shift+enter",
   "app.message.dequeue": "alt+up",
   "app.clipboard.pasteImage": "ctrl+shift+v",
   "tui.input.submit": "ctrl+enter",
