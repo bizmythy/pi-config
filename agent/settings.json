@@ -10,7 +10,6 @@
   "packages": [
     "npm:pi-web-access",
     "npm:pi-ask-user",
-    "../bun/node_modules/pi-vim",
     {
       "source": "npm:pi-subagents",
       "skills": [],

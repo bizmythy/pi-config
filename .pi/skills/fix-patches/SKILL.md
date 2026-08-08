@@ -14,7 +14,6 @@ Work **only** on the portion of `scripts/install.nu` that evaluates patch-packag
 
 - The Bun workspace patches in `patches/`, applied to `bun/node_modules/`.
 - The Pi-managed package patches in `agent/patches/`, applied to `agent/npm/node_modules/` by `apply-agent-npm-patches`.
-- The patch-specific verification for patched `pi-vim` files.
 
 Do not run the complete `scripts/install.nu`. Do not investigate or change authentication, secrets, profiles, Linear setup, Pi updates, package reconciliation, type declarations, or final package listing.
 
@@ -37,8 +36,7 @@ Do not run the complete `scripts/install.nu`. Do not investigate or change authe
 4. For each failure, inspect the failing patch and the installed package version/content. Repair the patch so it preserves the intended project behavior against the currently installed package; do not merely delete a failing hunk or patch.
 5. Keep changes limited to patch files unless a minimal patch-related manifest or installer correction is demonstrably required.
 6. Re-run both direct patch-package commands after repairs, even if only one patch set changed.
-7. Re-run the patch-specific `pi-vim` verification represented in `scripts/install.nu` and confirm that `bun/node_modules/pi-vim/clipboard-policy.ts` exists.
-8. Report which patch files changed and the results of both patch evaluations.
+7. Report which patch files changed and the results of both patch evaluations.
 
 ## Guardrails
 

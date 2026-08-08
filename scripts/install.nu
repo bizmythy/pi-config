@@ -10,6 +10,7 @@
 # - creates isolated work/personal Pi login profiles (existing logins become personal; work uses Azure)
 # - generates local secret files from the committed 1Password templates
 # - verifies that the Linear CLI is authenticated
+# - verifies that Neovim is available for the embedded prompt editor
 # - verifies that Pi can resolve the configured packages
 #
 # Usage:
@@ -211,10 +212,10 @@ def main [
   let personal_template = ($secrets_dir | path join "personal.json.tpl")
   let work_template = ($secrets_dir | path join "work.json.tpl")
 
-  let required_commands = ["bun", "pi", "linear"]
+  let required_commands = ["bun", "pi", "linear", "nvim"]
   for cmd in $required_commands {
     if not (command-exists $cmd) {
-      error make {msg: $"Missing required command `($cmd)`. Install/start Pi first so its commands are available."}
+      error make {msg: $"Missing required command `($cmd)`. Install it, ensure it is on PATH, and rerun this script."}
     }
   }
 
@@ -291,7 +292,7 @@ def main [
   ^bun install --cwd $agent_dir --frozen-lockfile
 
   let required_local_packages = [
-    ($bun_dir | path join "node_modules" "pi-vim"),
+    ($agent_dir | path join "node_modules" "@msgpack" "msgpack"),
     ($agent_dir | path join "node_modules" "qrcode"),
     ($agent_dir | path join "node_modules" "remark-parse"),
     ($agent_dir | path join "node_modules" "unified"),
@@ -302,12 +303,6 @@ def main [
     if not ($pkg | path exists) {
       error make {msg: $"Expected local package was not installed: ($pkg)"}
     }
-  }
-
-  if (($bun_dir | path join "node_modules" "pi-vim" "clipboard-policy.ts") | path exists) {
-    say "Verified patched pi-vim files are present"
-  } else {
-    error make {msg: "pi-vim installed, but patched file clipboard-policy.ts is missing; patch-package did not apply as expected."}
   }
 
   # Pi always stores registry packages under agent/npm, regardless of which
