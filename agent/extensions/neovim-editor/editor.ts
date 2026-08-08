@@ -12,6 +12,7 @@ import { PiAutocompleteController } from "./autocomplete";
 import { releaseGlobalDebugHandler } from "./debug-key";
 import { PromptHistory } from "./history";
 import { NeovimInputParser, toNeovimInput } from "./input";
+import { neovimGridHeight } from "./layout";
 import { modeLabel } from "./mode";
 import { type NeovimEditorState, NeovimHost } from "./nvim-host";
 
@@ -38,7 +39,13 @@ export class NeovimEditor implements EditorComponent {
   onExtensionShortcut?: (data: string) => boolean;
 
   private host: NeovimHost;
-  private state: NeovimEditorState = { lines: [""], cursorLine: 0, cursorColumn: 0, promptBufferActive: true };
+  private state: NeovimEditorState = {
+    lines: [""],
+    cursorLine: 0,
+    cursorColumn: 0,
+    promptBufferActive: true,
+    displayHeight: 1,
+  };
   private readonly autocomplete: PiAutocompleteController;
   private readonly inputParser = new NeovimInputParser();
   private inputFlushTimer?: ReturnType<typeof setTimeout>;
@@ -48,7 +55,7 @@ export class NeovimEditor implements EditorComponent {
   private disposed = false;
   private error?: string;
   private lastWidth = 80;
-  private lastHeight = 8;
+  private lastHeight = 1;
   private restartCount = 0;
   private lastNotifiedText = "";
   private preserveHistoryNavigation = false;
@@ -180,7 +187,7 @@ export class NeovimEditor implements EditorComponent {
 
   render(width: number): string[] {
     this.lastWidth = width;
-    this.lastHeight = Math.max(3, Math.min(16, Math.floor(this.tui.terminal.rows * 0.3)));
+    this.lastHeight = neovimGridHeight(this.state.displayHeight, this.tui.terminal.rows);
     const contentWidth = this.contentWidth(width);
     if (!this.started) {
       this.started = true;
@@ -197,7 +204,7 @@ export class NeovimEditor implements EditorComponent {
     };
 
     const result = [horizontal];
-    const grid = this.host.grid.render(this.focused, !this.tui.getShowHardwareCursor());
+    const grid = this.host.grid.render(this.focused, !this.tui.getShowHardwareCursor()).slice(0, this.lastHeight);
     if (grid.length > 0) {
       result.push(...grid.map(renderContent));
       this.error = undefined;

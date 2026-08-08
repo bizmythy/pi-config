@@ -17,6 +17,7 @@ test("a real embedded Neovim owns editing, state synchronization, and shutdown",
   if (!Bun.which("nvim")) return;
 
   let latestText = "";
+  let latestDisplayHeight = 0;
   let exitRequests = 0;
   const errors: string[] = [];
   const host = new NeovimHost({
@@ -24,6 +25,7 @@ test("a real embedded Neovim owns editing, state synchronization, and shutdown",
     args: ["--clean", "--embed"],
     onState: (state) => {
       latestText = state.lines.join("\n");
+      latestDisplayHeight = state.displayHeight;
     },
     onSubmit: () => undefined,
     onRequestExit: () => {
@@ -38,6 +40,15 @@ test("a real embedded Neovim owns editing, state synchronization, and shutdown",
     await host.start(50, 8);
     expect(host.isReady).toBe(true);
     expect(host.grid.size).toEqual({ width: 50, height: 8 });
+    expect(latestDisplayHeight).toBe(1);
+
+    host.resize(12, 8);
+    await waitFor(() => host.grid.size.width === 12);
+    await host.setState(["abcdefghijklmnopqrstuvwx"], 0, 0);
+    await waitFor(() => latestText === "abcdefghijklmnopqrstuvwx" && latestDisplayHeight > 1);
+    await host.setText("");
+    host.resize(50, 8);
+    await waitFor(() => host.grid.size.width === 50 && latestText === "");
 
     expect(host.grid.cursorShape).toBe("block");
     host.sendKeys("i");
@@ -57,7 +68,7 @@ test("a real embedded Neovim owns editing, state synchronization, and shutdown",
     await waitFor(() => host.grid.mode === "normal");
 
     await host.setState(["emoji 😀", "second"], 0, 8);
-    await waitFor(() => latestText === "emoji 😀\nsecond");
+    await waitFor(() => latestText === "emoji 😀\nsecond" && latestDisplayHeight === 2);
     await host.insertText("!");
     await waitFor(() => latestText === "emoji 😀!\nsecond");
 

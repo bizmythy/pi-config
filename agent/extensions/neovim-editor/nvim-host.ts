@@ -9,6 +9,7 @@ export interface NeovimEditorState {
   cursorLine: number;
   cursorColumn: number;
   promptBufferActive: boolean;
+  displayHeight: number;
 }
 
 export interface NeovimHostOptions {
@@ -145,6 +146,7 @@ export class NeovimHost {
       cursorLine: lines.length - 1,
       cursorColumn: lines.at(-1)?.length ?? 0,
       promptBufferActive: true,
+      displayHeight: Math.max(1, lines.length),
     };
     this.grid.onFlush = () => {
       this.options.onRender();
@@ -279,6 +281,7 @@ export class NeovimHost {
       cursorLine: targetLine,
       cursorColumn: targetColumn,
       promptBufferActive: true,
+      displayHeight: Math.max(1, normalized.length),
     };
     this.options.onState(this.editorState);
 
@@ -368,12 +371,12 @@ export class NeovimHost {
   private async syncState(): Promise<void> {
     if (!this.rpc || !this.ready) return;
     try {
-      const result = await this.rpc.request<[string[], number, number, boolean] | null>("nvim_exec_lua", [
+      const result = await this.rpc.request<[string[], number, number, boolean, number] | null>("nvim_exec_lua", [
         GET_STATE_LUA,
         [],
       ]);
       if (!result) throw new Error("the [Pi Prompt] buffer no longer exists");
-      const [lines, cursorLine, byteColumn, active] = result;
+      const [lines, cursorLine, byteColumn, active, displayHeight] = result;
       const normalized = lines.length > 0 ? lines : [""];
       const line = normalized[cursorLine] ?? "";
       this.state = {
@@ -381,6 +384,7 @@ export class NeovimHost {
         cursorLine: active ? Math.max(0, cursorLine) : this.state.cursorLine,
         cursorColumn: active ? byteColumnToStringColumn(line, byteColumn) : this.state.cursorColumn,
         promptBufferActive: active,
+        displayHeight: Math.max(1, displayHeight),
       };
       this.options.onState(this.editorState);
     } catch (error) {

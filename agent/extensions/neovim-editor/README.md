@@ -29,4 +29,4 @@ Prompt history remains in `~/.pi/agent/prompt-history.json`; `/history-clear` cl
 - Mouse events are not forwarded because Pi's component API does not expose the prompt grid's absolute screen origin.
 - Neovim optional external widgets and multigrid are disabled. Command line, messages, popup menus, floating windows, and plugin UI are composed by Neovim into its normal line grid.
 - Opening another Neovim buffer is allowed and displayed, but Pi autocomplete pauses until `[Pi Prompt]` is current again. Pi submission always reads the dedicated prompt buffer.
-- The grid height is about 30% of the terminal, clamped to 3–16 rows.
+- The grid starts at one row, grows with Neovim's measured display height, and then scrolls at Pi's terminal-relative editor maximum.
