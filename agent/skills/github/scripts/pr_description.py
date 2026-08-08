@@ -28,9 +28,7 @@ import websocket
 
 IMAGE_EXTENSIONS = {".gif", ".jpeg", ".jpg", ".png", ".svg"}
 VIDEO_EXTENSIONS = {".mov", ".mp4", ".webm"}
-ATTACHMENT_URL_RE = re.compile(
-    r"https://github\.com/user-attachments/(?:assets|files)/[^\s)]+"
-)
+ATTACHMENT_URL_RE = re.compile(r"https://github\.com/user-attachments/(?:assets|files)/[^\s)]+")
 ASSETS_RELEASE_TAG = "_pi-pr-description-assets"
 
 
@@ -133,12 +131,8 @@ def validate_marker(body: str, media: MediaSpec) -> None:
     count = body.count(media.marker)
     if count != 1:
         raise fail(f"marker {media.marker!r} must occur exactly once in the PR body (found {count})")
-    if media.kind == "video" and not re.search(
-        rf"(?m)^[ \t]*{re.escape(media.marker)}[ \t]*$", body
-    ):
-        raise fail(
-            f"video marker {media.marker!r} must be alone on its line so GitHub renders a player"
-        )
+    if media.kind == "video" and not re.search(rf"(?m)^[ \t]*{re.escape(media.marker)}[ \t]*$", body):
+        raise fail(f"video marker {media.marker!r} must be alone on its line so GitHub renders a player")
 
 
 def replace_marker(body: str, media: MediaSpec, href: str) -> str:

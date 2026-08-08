@@ -1,0 +1,35 @@
+#!/usr/bin/env nu
+
+# Check if Nix is installed.
+if (which nix | is-empty) {
+    print "error: nix is not installed, cannot `nix fmt`"
+    exit 1
+}
+
+# Format staged files, excluding lock files.
+let staged_files = (
+    git diff --cached --name-only --diff-filter=ACMR
+    | lines
+    | where { |line| (not ($line | str contains "lock")) }
+)
+
+if ($staged_files | is-empty) {
+    exit 0
+}
+
+print "running nix fmt..."
+try {
+    nix fmt ...$staged_files
+} catch {
+    print $"(ansi red)error: nix fmt formatting failed.(ansi reset)"
+    exit 1
+}
+
+git add ...$staged_files
+
+let time_since_update = (date now) - (git log -1 --format="%ad" -- flake.lock | into datetime)
+if ($time_since_update > 1.wk) {
+    print $"(ansi yellow)warning: flake.lock is out of date.(ansi reset)"
+}
+
+print "formatting complete"

@@ -1,3 +1,6 @@
+# direnv
+.direnv
+
 # authentication
 agent/auth.json
 agent/auth.pre-profiles.json

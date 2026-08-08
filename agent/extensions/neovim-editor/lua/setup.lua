@@ -22,12 +22,15 @@ vim.api.nvim_buf_create_user_command(buffer, "PiSubmit", function()
 end, { desc = "Submit the current prompt to Pi" })
 
 local group = vim.api.nvim_create_augroup("PiEmbeddedPrompt", { clear = true })
-vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI", "CursorMoved", "CursorMovedI", "ModeChanged", "BufEnter" }, {
-  group = group,
-  callback = function()
-    vim.rpcnotify(channel, "pi_state_dirty")
-  end,
-})
+vim.api.nvim_create_autocmd(
+  { "TextChanged", "TextChangedI", "CursorMoved", "CursorMovedI", "ModeChanged", "BufEnter" },
+  {
+    group = group,
+    callback = function()
+      vim.rpcnotify(channel, "pi_state_dirty")
+    end,
+  }
+)
 vim.api.nvim_create_autocmd("VimLeavePre", {
   group = group,
   once = true,

@@ -3,9 +3,7 @@
   "defaultProvider": "azure-foundry",
   "defaultModel": "gpt-5.6-sol",
   "extensions": [],
-  "npmCommand": [
-    "bun"
-  ],
+  "npmCommand": ["bun"],
   "defaultThinkingLevel": "high",
   "packages": [
     "npm:pi-web-access",

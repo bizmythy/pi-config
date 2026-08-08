@@ -133,12 +133,16 @@ def snapshot(output: Path, full: bool, ocr: bool) -> None:
     if ocr:
         emit(request("GET", "/api/streamer/snapshot", params={"ocr": "true", "ocr_langs": "chi_sim,eng"}))
         return
-    params = {} if full else {
-        "preview": "true",
-        "preview_max_width": 1280,
-        "preview_max_height": 720,
-        "preview_quality": 80,
-    }
+    params = (
+        {}
+        if full
+        else {
+            "preview": "true",
+            "preview_max_width": 1280,
+            "preview_max_height": 720,
+            "preview_quality": 80,
+        }
+    )
     response = request("GET", "/api/streamer/snapshot", params=params)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_bytes(response.content)
@@ -168,7 +172,15 @@ def shortcut(keys: str) -> None:
 @click.option("--slow", is_flag=True, help="Add a delay between keystrokes.")
 def type_text(text: str, slow: bool) -> None:
     """Type literal text through the KVM keyboard."""
-    emit(request("POST", "/api/hid/print", params={"slow": str(slow).lower()}, content=text, headers={"Content-Type": "text/plain"}))
+    emit(
+        request(
+            "POST",
+            "/api/hid/print",
+            params={"slow": str(slow).lower()},
+            content=text,
+            headers={"Content-Type": "text/plain"},
+        )
+    )
 
 
 @cli.command()

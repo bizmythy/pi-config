@@ -14,12 +14,8 @@
       "@earendil-works/pi-coding-agent": [
         "./bun/typecheck/node_modules/@earendil-works/pi-coding-agent/dist/index.d.ts"
       ],
-      "@earendil-works/pi-ai": [
-        "./bun/typecheck/node_modules/@earendil-works/pi-ai/dist/index.d.ts"
-      ],
-      "@earendil-works/pi-tui": [
-        "./bun/typecheck/node_modules/@earendil-works/pi-tui/dist/index.d.ts"
-      ]
+      "@earendil-works/pi-ai": ["./bun/typecheck/node_modules/@earendil-works/pi-ai/dist/index.d.ts"],
+      "@earendil-works/pi-tui": ["./bun/typecheck/node_modules/@earendil-works/pi-tui/dist/index.d.ts"]
     }
   },
   "include": ["**/*.ts"],
