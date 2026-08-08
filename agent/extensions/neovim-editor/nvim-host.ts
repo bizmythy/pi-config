@@ -2,6 +2,7 @@ import { Buffer as NodeBuffer } from "node:buffer";
 import { type ChildProcessWithoutNullStreams, spawn, spawnSync } from "node:child_process";
 import { decodeMultiStream, encode } from "@msgpack/msgpack";
 import { NeovimGrid } from "./grid";
+import { GET_STATE_LUA, INSERT_TEXT_LUA, SET_STATE_LUA, SETUP_LUA } from "./lua/lua-scripts";
 
 export interface NeovimEditorState {
   lines: string[];
@@ -117,62 +118,6 @@ class NeovimRpc {
     }
   }
 }
-
-const SETUP_LUA = `
-local channel, lines, row, byte_col = ...
--- Pi renders the active mode in its editor border. Keep Neovim's native
--- command line and messages, but omit its redundant statusline and mode row.
-vim.o.laststatus = 0
-vim.o.showmode = false
-vim.o.ruler = false
-vim.o.cmdheight = 0
-local buffer = vim.api.nvim_create_buf(false, true)
-vim.g.pi_prompt_buffer = buffer
-vim.api.nvim_buf_set_name(buffer, '[Pi Prompt]')
-vim.bo[buffer].bufhidden = 'hide'
-vim.bo[buffer].swapfile = false
-vim.bo[buffer].undofile = false
-vim.bo[buffer].filetype = 'markdown'
-vim.api.nvim_set_current_buf(buffer)
-vim.api.nvim_buf_set_lines(buffer, 0, -1, false, lines)
-vim.api.nvim_win_set_cursor(0, { row + 1, byte_col })
-vim.api.nvim_buf_create_user_command(buffer, 'PiSubmit', function()
-  vim.rpcnotify(channel, 'pi_submit')
-end, { desc = 'Submit the current prompt to Pi' })
-local group = vim.api.nvim_create_augroup('PiEmbeddedPrompt', { clear = true })
-vim.api.nvim_create_autocmd({ 'TextChanged', 'TextChangedI', 'CursorMoved', 'CursorMovedI', 'ModeChanged', 'BufEnter' }, {
-  group = group,
-  callback = function() vim.rpcnotify(channel, 'pi_state_dirty') end,
-})
-return buffer
-`;
-
-const GET_STATE_LUA = `
-local buffer = vim.g.pi_prompt_buffer
-if not buffer or not vim.api.nvim_buf_is_valid(buffer) then return nil end
-local lines = vim.api.nvim_buf_get_lines(buffer, 0, -1, false)
-local active = vim.api.nvim_get_current_buf() == buffer
-local cursor = active and vim.api.nvim_win_get_cursor(0) or { 1, 0 }
-return { lines, cursor[1] - 1, cursor[2], active }
-`;
-
-const SET_STATE_LUA = `
-local lines, row, byte_col = ...
-local buffer = vim.g.pi_prompt_buffer
-if not buffer or not vim.api.nvim_buf_is_valid(buffer) then return false end
-vim.api.nvim_buf_set_lines(buffer, 0, -1, false, lines)
-if vim.api.nvim_get_current_buf() == buffer then vim.api.nvim_win_set_cursor(0, { row + 1, byte_col }) end
-return true
-`;
-
-const INSERT_TEXT_LUA = `
-local row, byte_col, replacement, target_row, target_byte_col = ...
-local buffer = vim.g.pi_prompt_buffer
-if not buffer or not vim.api.nvim_buf_is_valid(buffer) then return false end
-vim.api.nvim_buf_set_text(buffer, row, byte_col, row, byte_col, replacement)
-if vim.api.nvim_get_current_buf() == buffer then vim.api.nvim_win_set_cursor(0, { target_row + 1, target_byte_col }) end
-return true
-`;
 
 /** Owns one embedded Neovim process and its prompt buffer. */
 export class NeovimHost {
