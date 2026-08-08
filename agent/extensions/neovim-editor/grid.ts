@@ -215,7 +215,9 @@ export class NeovimGrid {
       if (!Array.isArray(rawCell)) continue;
       const text = String(rawCell[0] ?? "");
       if (rawCell.length > 1 && rawCell[1] !== undefined) inheritedHighlight = Number(rawCell[1]);
-      const repeat = Math.max(1, Number(rawCell[2] ?? 1));
+      // Neovim uses a trailing space with repeat=0 as a line-state sentinel.
+      // It carries no cell update and must not erase the cell under the cursor.
+      const repeat = Math.max(0, Number(rawCell[2] ?? 1));
       for (let count = 0; count < repeat && targetColumn < grid.width; count += 1) {
         if (targetColumn >= 0) grid.rows[row][targetColumn] = { text, highlightId: inheritedHighlight };
         targetColumn += 1;

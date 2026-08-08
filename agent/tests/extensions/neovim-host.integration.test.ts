@@ -1,6 +1,10 @@
 import { expect, test } from "bun:test";
 import { NeovimHost } from "../../extensions/neovim-editor/nvim-host";
 
+// biome-ignore lint/suspicious/noControlCharactersInRegex: this strips terminal protocol sequences from assertions.
+const terminalSequence = /\x1b(?:\[[0-?]*[ -/]*[@-~]|_[^\x07]*\x07)/g;
+const stripAnsi = (value: string) => value.replace(terminalSequence, "");
+
 async function waitFor(predicate: () => boolean, timeoutMs = 2000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (!predicate()) {
@@ -52,6 +56,16 @@ test("a real embedded Neovim owns editing, state synchronization, and shutdown",
     await waitFor(() => latestText === "emoji 😀\nsecond");
     await host.insertText("!");
     await waitFor(() => latestText === "emoji 😀!\nsecond");
+
+    await host.setState(["test 1234 hello"], 0, 0);
+    host.sendKeys("v");
+    await waitFor(() => host.grid.mode === "visual");
+    const visualFrame = host.grid.version;
+    host.sendKeys("w");
+    await waitFor(() => host.grid.version > visualFrame);
+    expect(stripAnsi(host.grid.render(false)[0])).toContain("test 1234 hello");
+    host.sendKeys("<Esc>");
+
     expect(errors).toEqual([]);
   } finally {
     await host.dispose();

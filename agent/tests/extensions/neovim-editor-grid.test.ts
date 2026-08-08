@@ -55,6 +55,22 @@ describe("embedded Neovim line-grid rendering", () => {
     expect(stripAnsi(grid.render(false)[1])).toBe("        ");
   });
 
+  test("ignores Neovim's zero-repeat trailing-space sentinel", () => {
+    const grid = new NeovimGrid();
+    grid.handleRedraw([
+      ["grid_resize", [1, 9, 1]],
+      ["grid_line", [1, 0, 0, [["t", 0], ["e"], ["s"], ["t"], [" "], ["1"], ["2"], ["3"], ["4"]], false]],
+      ["flush", []],
+    ]);
+    grid.handleRedraw([
+      ["grid_line", [1, 0, 0, [["t", 4], ["e"], ["s"], ["t"], [" "], [" ", 0, 0]], false]],
+      ["grid_cursor_goto", [1, 0, 5]],
+      ["flush", []],
+    ]);
+
+    expect(stripAnsi(grid.render(false)[0])).toBe("test 1234");
+  });
+
   test("places Pi's zero-width cursor marker at Neovim's cursor cell", () => {
     const grid = new NeovimGrid();
     grid.handleRedraw([
