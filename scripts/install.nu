@@ -17,6 +17,7 @@
 #   ./scripts/install.nu --pull              # also git pull --ff-only --autostash first
 #   ./scripts/install.nu --skip-pi-update    # do not run `pi update --extensions`
 #   ./scripts/install.nu --skip-pi-list      # do not run final `pi list`
+#   ./scripts/install.nu --force-inject      # regenerate secret files even when their keys match
 
 use utils.nu *
 
@@ -27,6 +28,36 @@ def command-exists [cmd: string] {
 def linear-authenticated [] {
   let result = (do { ^linear auth whoami } | complete)
   $result.exit_code == 0
+}
+
+def json-key-paths [value: any, prefix: string = ""] {
+  if not (($value | describe) | str starts-with "record") {
+    return []
+  }
+
+  $value
+  | columns
+  | each {|key|
+      let path = if ($prefix | is-empty) { $key } else { $"($prefix).($key)" }
+      [$path ...(json-key-paths ($value | get $key) $path)]
+    }
+  | flatten
+  | sort
+}
+
+def secret-keys-match [template_file: string, secret_file: string] {
+  if not ($secret_file | path exists) {
+    return false
+  }
+
+  let expected_keys = (json-key-paths (open --raw $template_file | from json))
+  let existing_keys = (try {
+    json-key-paths (open --raw $secret_file | from json)
+  } catch {
+    []
+  })
+
+  $existing_keys == $expected_keys
 }
 
 def setup-auth-profiles [agent_dir: string] {
@@ -148,6 +179,7 @@ def main [
   --pull(-p)             # Pull this repo before installing.
   --skip-pi-update       # Skip `pi update --extensions`.
   --skip-pi-list         # Skip final `pi list` verification.
+  --force-inject         # Regenerate secret files even when their keys match.
 ] {
   let repo = (repo-root)
   cd $repo
@@ -176,7 +208,10 @@ def main [
     error make {msg: $"Missing agent package manifest: ($agent_dir | path join 'package.json')"}
   }
 
-  let required_commands = ["bun", "pi", "linear", "op"]
+  let personal_template = ($secrets_dir | path join "personal.json.tpl")
+  let work_template = ($secrets_dir | path join "work.json.tpl")
+
+  let required_commands = ["bun", "pi", "linear"]
   for cmd in $required_commands {
     if not (command-exists $cmd) {
       error make {msg: $"Missing required command `($cmd)`. Install/start Pi first so its commands are available."}
@@ -196,11 +231,27 @@ def main [
     ^git pull --ff-only --autostash
   }
 
+  let inject_personal = ($force_inject or not (secret-keys-match $personal_template $personal_secrets))
+  let inject_work = ($force_inject or not (secret-keys-match $work_template $work_secrets))
+  if ($inject_personal or $inject_work) and not (command-exists "op") {
+    error make {msg: "Missing required command `op`; at least one secret file needs to be generated."}
+  }
+
   setup-auth-profiles $agent_dir
 
-  say "Generating local secret files"
-  ^op --account $personal_account inject --in-file ($secrets_dir | path join "personal.json.tpl") --out-file $personal_secrets --force
-  ^op --account $work_account inject --in-file ($secrets_dir | path join "work.json.tpl") --out-file $work_secrets --force
+  if $inject_personal {
+    say "Generating personal secret file"
+    ^op --account $personal_account inject --in-file $personal_template --out-file $personal_secrets --force
+  } else {
+    say "Personal secret file already has the expected keys; skipping 1Password injection"
+  }
+
+  if $inject_work {
+    say "Generating work secret file"
+    ^op --account $work_account inject --in-file $work_template --out-file $work_secrets --force
+  } else {
+    say "Work secret file already has the expected keys; skipping 1Password injection"
+  }
 
   if (linear-authenticated) {
     say "Linear CLI is authenticated"
