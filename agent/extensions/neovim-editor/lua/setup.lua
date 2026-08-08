@@ -36,4 +36,5 @@ vim.api.nvim_create_autocmd("VimLeavePre", {
   end,
 })
 
+vim.cmd.startinsert()
 return buffer

@@ -41,6 +41,7 @@ test("a real embedded Neovim owns editing, state synchronization, and shutdown",
     expect(host.isReady).toBe(true);
     expect(host.grid.size).toEqual({ width: 50, height: 8 });
     expect(latestDisplayHeight).toBe(1);
+    await waitFor(() => host.grid.cursorShape === "vertical");
 
     host.resize(12, 8);
     await waitFor(() => host.grid.size.width === 12);
@@ -50,9 +51,7 @@ test("a real embedded Neovim owns editing, state synchronization, and shutdown",
     host.resize(50, 8);
     await waitFor(() => host.grid.size.width === 50 && latestText === "");
 
-    expect(host.grid.cursorShape).toBe("block");
-    host.sendKeys("i");
-    await waitFor(() => host.grid.cursorShape === "vertical");
+    expect(host.grid.cursorShape).toBe("vertical");
     const insertFrame = host.grid.render(false).join("\n");
     expect(insertFrame).not.toContain("-- INSERT --");
     expect(insertFrame).not.toContain("[Pi Prompt]");
@@ -74,7 +73,8 @@ test("a real embedded Neovim owns editing, state synchronization, and shutdown",
 
     await host.setState(["test 1234 hello"], 0, 0);
     host.sendKeys("v");
-    await waitFor(() => host.grid.mode === "visual");
+    await waitFor(() => host.grid.mode === "visual" && host.grid.cursorShape === "block");
+    expect(host.grid.cursorShape).toBe("block");
     const visualFrame = host.grid.version;
     host.sendKeys("w");
     await waitFor(() => host.grid.version > visualFrame);
@@ -108,7 +108,7 @@ test("Neovim :q requests Pi exit instead of reporting an unexpected child exit",
 
   try {
     await host.start(40, 6);
-    host.sendKeys(":q<CR>");
+    host.sendKeys("<Esc>:q<CR>");
     await waitFor(() => childExits.length === 1);
 
     expect(exitRequests).toBe(1);
