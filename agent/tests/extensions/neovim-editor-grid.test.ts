@@ -63,6 +63,33 @@ describe("embedded Neovim line-grid rendering", () => {
     expect(grid.render(false)).not.toContain("\x1b_pi:c\x07");
   });
 
+  test("tracks Neovim cursor shapes across mode changes", () => {
+    const grid = new NeovimGrid();
+    grid.handleRedraw([
+      [
+        "mode_info_set",
+        [
+          true,
+          [
+            { cursor_shape: "block", cell_percentage: 100 },
+            { cursor_shape: "vertical", cell_percentage: 25 },
+          ],
+        ],
+      ],
+      ["mode_change", ["insert", 1]],
+      ["flush", []],
+    ]);
+    expect(grid.mode).toBe("insert");
+    expect(grid.cursorShape).toBe("vertical");
+    expect(grid.cursorCellPercentage).toBe(25);
+
+    grid.handleRedraw([
+      ["mode_change", ["normal", 0]],
+      ["flush", []],
+    ]);
+    expect(grid.cursorShape).toBe("block");
+  });
+
   test("ignores unknown redraw events without losing the next frame", () => {
     const grid = new NeovimGrid();
     grid.handleRedraw([

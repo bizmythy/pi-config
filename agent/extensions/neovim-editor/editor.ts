@@ -49,6 +49,8 @@ export class NeovimEditor implements EditorComponent {
   private restartCount = 0;
   private lastNotifiedText = "";
   private preserveHistoryNavigation = false;
+  private readonly previousHardwareCursor: boolean;
+  private lastCursorShape?: string;
 
   constructor(
     private readonly tui: TUI,
@@ -57,6 +59,8 @@ export class NeovimEditor implements EditorComponent {
     private readonly options: NeovimEditorOptions,
   ) {
     this.borderColor = theme.borderColor;
+    this.previousHardwareCursor = tui.getShowHardwareCursor();
+    tui.setShowHardwareCursor(true);
     this.history = options.history ?? new PromptHistory();
     this.host = this.createHost("");
     this.autocomplete = new PiAutocompleteController({
@@ -110,7 +114,10 @@ export class NeovimEditor implements EditorComponent {
         }
         this.tui.requestRender();
       },
-      onRender: () => this.tui.requestRender(),
+      onRender: () => {
+        this.applyCursorShape();
+        this.tui.requestRender();
+      },
     });
   }
 
@@ -180,7 +187,7 @@ export class NeovimEditor implements EditorComponent {
     };
 
     const result = [horizontal];
-    const grid = this.host.grid.render(this.focused);
+    const grid = this.host.grid.render(this.focused, !this.tui.getShowHardwareCursor());
     if (grid.length > 0) {
       result.push(...grid.map(renderContent));
       this.error = undefined;
@@ -193,6 +200,14 @@ export class NeovimEditor implements EditorComponent {
     result.push(horizontal);
     result.push(...this.autocomplete.render(contentWidth).map(renderContent));
     return result;
+  }
+
+  private applyCursorShape(): void {
+    const shape = this.host.grid.cursorShape;
+    if (shape === this.lastCursorShape) return;
+    this.lastCursorShape = shape;
+    const code = shape === "vertical" ? 6 : shape === "horizontal" ? 4 : 2;
+    this.tui.terminal.write(`\x1b[${code} q`);
   }
 
   private contentWidth(width: number): number {
@@ -328,5 +343,7 @@ export class NeovimEditor implements EditorComponent {
     if (this.inputFlushTimer) clearTimeout(this.inputFlushTimer);
     this.autocomplete.cancel();
     await this.host.dispose();
+    this.tui.terminal.write("\x1b[0 q");
+    this.tui.setShowHardwareCursor(this.previousHardwareCursor);
   }
 }

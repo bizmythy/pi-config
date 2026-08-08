@@ -54,6 +54,11 @@ interface GridState {
   rows: GridCell[][];
 }
 
+interface ModeInfo {
+  cursor_shape?: "block" | "horizontal" | "vertical";
+  cell_percentage?: number;
+}
+
 const emptyCell = (): GridCell => ({ text: " ", highlightId: 0 });
 const emptyRow = (width: number): GridCell[] => Array.from({ length: width }, emptyCell);
 
@@ -92,6 +97,9 @@ export class NeovimGrid {
   private cursorRow = 0;
   private cursorColumn = 0;
   private currentMode = "normal";
+  private cursorStyleEnabled = false;
+  private modeInfos: ModeInfo[] = [];
+  private modeIndex = 0;
   private frameVersion = 0;
 
   onFlush?: () => void;
@@ -102,6 +110,15 @@ export class NeovimGrid {
 
   get mode(): string {
     return this.currentMode;
+  }
+
+  get cursorShape(): "block" | "horizontal" | "vertical" {
+    if (!this.cursorStyleEnabled) return "block";
+    return this.modeInfos[this.modeIndex]?.cursor_shape ?? "block";
+  }
+
+  get cursorCellPercentage(): number {
+    return this.modeInfos[this.modeIndex]?.cell_percentage ?? 100;
   }
 
   get size(): { width: number; height: number } {
@@ -153,8 +170,13 @@ export class NeovimGrid {
       case "hl_attr_define":
         this.highlights.set(Number(args[0]), (args[1] ?? {}) as HighlightAttributes);
         break;
+      case "mode_info_set":
+        this.cursorStyleEnabled = Boolean(args[0]);
+        this.modeInfos = Array.isArray(args[1]) ? (args[1] as ModeInfo[]) : [];
+        break;
       case "mode_change":
         this.currentMode = String(args[0] ?? "normal");
+        this.modeIndex = Number(args[1] ?? 0);
         break;
       case "flush":
         this.frameVersion += 1;
@@ -225,7 +247,7 @@ export class NeovimGrid {
     }
   }
 
-  render(focused: boolean): string[] {
+  render(focused: boolean, softwareCursor = true): string[] {
     const grid = this.grids.get(1);
     if (!grid) return [];
 
@@ -240,9 +262,10 @@ export class NeovimGrid {
         }
         const hasCursor =
           focused && this.cursorGrid === 1 && rowIndex === this.cursorRow && column === this.cursorColumn;
-        if (hasCursor) output += `${CURSOR_MARKER}\x1b[7m`;
+        if (hasCursor) output += CURSOR_MARKER;
+        if (hasCursor && softwareCursor) output += "\x1b[7m";
         output += cell.text;
-        if (hasCursor) output += ansiForHighlight(this.highlights.get(cell.highlightId));
+        if (hasCursor && softwareCursor) output += ansiForHighlight(this.highlights.get(cell.highlightId));
       }
       output += "\x1b[0m";
       const missing = grid.width - cellWidth(output);
