@@ -120,6 +120,12 @@ class NeovimRpc {
 
 const SETUP_LUA = `
 local channel, lines, row, byte_col = ...
+-- Pi renders the active mode in its editor border. Keep Neovim's native
+-- command line and messages, but omit its redundant statusline and mode row.
+vim.o.laststatus = 0
+vim.o.showmode = false
+vim.o.ruler = false
+vim.o.cmdheight = 0
 local buffer = vim.api.nvim_create_buf(false, true)
 vim.g.pi_prompt_buffer = buffer
 vim.api.nvim_buf_set_name(buffer, '[Pi Prompt]')

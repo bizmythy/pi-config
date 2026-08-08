@@ -1,11 +1,18 @@
 import { describe, expect, test } from "bun:test";
 import { NeovimGrid } from "../../extensions/neovim-editor/grid";
+import { modeLabel } from "../../extensions/neovim-editor/mode";
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: this strips terminal protocol sequences from assertions.
 const terminalSequence = /\x1b(?:\[[0-?]*[ -/]*[@-~]|_[^\x07]*\x07)/g;
 const stripAnsi = (value: string) => value.replace(terminalSequence, "");
 
 describe("embedded Neovim line-grid rendering", () => {
+  test("uses concise labels for native Neovim mode families", () => {
+    expect(modeLabel("normal")).toBe("NORMAL");
+    expect(modeLabel("insert")).toBe("INSERT");
+    expect(modeLabel("visual_select")).toBe("SELECT");
+    expect(modeLabel("cmdline_insert")).toBe("COMMAND");
+  });
   test("applies repeated cells, highlights, scrolling, and flush boundaries", () => {
     const grid = new NeovimGrid();
     let flushes = 0;

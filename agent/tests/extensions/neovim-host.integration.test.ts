@@ -34,10 +34,19 @@ test("a real embedded Neovim owns editing, state synchronization, and shutdown",
     expect(host.grid.cursorShape).toBe("block");
     host.sendKeys("i");
     await waitFor(() => host.grid.cursorShape === "vertical");
+    const insertFrame = host.grid.render(false).join("\n");
+    expect(insertFrame).not.toContain("-- INSERT --");
+    expect(insertFrame).not.toContain("[Pi Prompt]");
     host.sendKeys("hello world<Esc>0dw");
     await waitFor(() => latestText === "world");
     expect(host.text).toBe("world");
     expect(host.grid.cursorShape).toBe("block");
+
+    host.sendKeys(":");
+    await waitFor(() => host.grid.mode.startsWith("cmdline"));
+    expect(host.grid.render(false).join("\n")).toContain(":");
+    host.sendKeys("<Esc>");
+    await waitFor(() => host.grid.mode === "normal");
 
     await host.setState(["emoji 😀", "second"], 0, 8);
     await waitFor(() => latestText === "emoji 😀\nsecond");

@@ -11,11 +11,13 @@ import {
 import { PiAutocompleteController } from "./autocomplete";
 import { PromptHistory } from "./history";
 import { NeovimInputParser, toNeovimInput } from "./input";
+import { modeLabel } from "./mode";
 import { type NeovimEditorState, NeovimHost } from "./nvim-host";
 
 interface NeovimEditorOptions {
   cwd: string;
   notify: (message: string, level: "info" | "error") => void;
+  colorizeMode?: (mode: string, label: string) => string;
   history?: PromptHistory;
 }
 
@@ -197,9 +199,18 @@ export class NeovimEditor implements EditorComponent {
         renderContent(this.error ? this.theme.selectList.noMatch(status) : this.theme.selectList.description(status)),
       );
     }
-    result.push(horizontal);
+    result.push(this.renderModeBorder(width));
     result.push(...this.autocomplete.render(contentWidth).map(renderContent));
     return result;
+  }
+
+  private renderModeBorder(width: number): string {
+    const mode = this.host.grid.mode;
+    const label = ` ${modeLabel(mode)} `;
+    if (visibleWidth(label) >= width) return this.borderColor("─".repeat(Math.max(1, width)));
+    const border = this.borderColor("─".repeat(width - visibleWidth(label)));
+    const styledLabel = this.options.colorizeMode?.(mode, label) ?? `\x1b[7m${this.borderColor(label)}\x1b[27m`;
+    return `${border}${styledLabel}`;
   }
 
   private applyCursorShape(): void {

@@ -6,6 +6,7 @@ Pi's prompt area is backed by a real `nvim --embed` process connected through a 
 
 - Neovim 0.10 or newer must be available as `nvim` on `PATH`.
 - The editor intentionally loads the normal user Neovim configuration. It does not silently retry with `--clean`.
+- Pi hides Neovim's redundant statusline and built-in mode row while retaining its native command line and messages. The active Neovim mode appears as a badge in Pi's lower editor border.
 - One Neovim child is started per interactive Pi session and stopped during `/reload` or shutdown.
 - The prompt uses a scratch buffer named `[Pi Prompt]` with Markdown filetype.
 

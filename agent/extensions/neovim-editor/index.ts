@@ -14,6 +14,14 @@ export default function neovimEditorExtension(pi: ExtensionAPI): void {
         cwd: ctx.cwd,
         history,
         notify: (message, level) => ctx.ui.notify(message, level),
+        colorizeMode: (mode, label) => {
+          const color = mode.startsWith("insert")
+            ? "borderMuted"
+            : mode.startsWith("cmdline")
+              ? "warning"
+              : "borderAccent";
+          return ctx.ui.theme.fg(color, `\x1b[7m${label}\x1b[27m`);
+        },
       });
       editors.add(editor);
       return editor;
