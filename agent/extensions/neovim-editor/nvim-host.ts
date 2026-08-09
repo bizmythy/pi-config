@@ -2,7 +2,7 @@ import { Buffer as NodeBuffer } from "node:buffer";
 import { type ChildProcessWithoutNullStreams, spawn, spawnSync } from "node:child_process";
 import { decodeMultiStream, encode } from "@msgpack/msgpack";
 import { NeovimGrid } from "./grid";
-import { GET_STATE_LUA, INSERT_TEXT_LUA, SET_STATE_LUA, SETUP_LUA } from "./lua/lua-scripts";
+import { GET_STATE_LUA, INSERT_TEXT_LUA, NORMALIZE_VIEWPORT_LUA, SET_STATE_LUA, SETUP_LUA } from "./lua/lua-scripts";
 
 export interface NeovimEditorState {
   lines: string[];
@@ -202,6 +202,10 @@ export class NeovimHost {
         SETUP_LUA,
         [channel, this.state.lines, this.state.cursorLine, stringColumnToByteColumn(line, this.state.cursorColumn)],
       ]);
+      // UI attach happens before setup removes Neovim's status and command rows,
+      // so Neovim may initially clamp a short prompt to a taller grid. Reapply
+      // the requested size after setup and normalize the resulting viewport.
+      await this.resizeUi(rpc, this.width, this.height);
       this.ready = true;
       await this.syncState();
       await this.flushInputQueue();
@@ -348,10 +352,18 @@ export class NeovimHost {
     this.width = nextWidth;
     this.height = nextHeight;
     if (this.ready && this.rpc) {
-      void this.rpc
-        .request("nvim_ui_try_resize", [nextWidth, nextHeight])
-        .catch((error) => this.fail(errorMessage(error)));
+      void this.resizeUi(this.rpc, nextWidth, nextHeight).catch((error) => this.fail(errorMessage(error)));
     }
+  }
+
+  private async resizeUi(rpc: NeovimRpc, width: number, height: number): Promise<void> {
+    const [, error] = await rpc.request<[unknown[], unknown]>("nvim_call_atomic", [
+      [
+        ["nvim_ui_try_resize", [width, height]],
+        ["nvim_exec_lua", [NORMALIZE_VIEWPORT_LUA, []]],
+      ],
+    ]);
+    if (error) throw new Error(errorMessage(error));
   }
 
   private enqueue(operation: () => Promise<void>): Promise<void> {

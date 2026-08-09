@@ -5,6 +5,7 @@ function loadLuaScript(name: string): string {
 }
 
 export const SETUP_LUA = loadLuaScript("setup");
+export const NORMALIZE_VIEWPORT_LUA = loadLuaScript("normalize-viewport");
 export const GET_STATE_LUA = loadLuaScript("get-state");
 export const SET_STATE_LUA = loadLuaScript("set-state");
 export const INSERT_TEXT_LUA = loadLuaScript("insert-text");

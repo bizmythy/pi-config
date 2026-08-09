@@ -93,6 +93,45 @@ test("a real embedded Neovim owns editing, state synchronization, and shutdown",
   expect(exitRequests).toBe(0);
 });
 
+test("the prompt viewport never scrolls past the end of the buffer", async () => {
+  if (!Bun.which("nvim")) return;
+
+  let latestText = "";
+  const errors: string[] = [];
+  const host = new NeovimHost({
+    cwd: process.cwd(),
+    args: ["--clean", "--embed"],
+    onState: (state) => {
+      latestText = state.lines.join("\n");
+    },
+    onSubmit: () => undefined,
+    onRequestExit: () => undefined,
+    onError: (message) => errors.push(message),
+    onExit: () => undefined,
+    onRender: () => undefined,
+  });
+  const renderedRows = () => host.grid.render(false).map((line) => stripAnsi(line).trimEnd());
+
+  try {
+    await host.start(20, 2);
+    await host.setState(["one", "two", "three"], 2, 0);
+    await waitFor(() => latestText === "one\ntwo\nthree" && renderedRows().join("|") === "two|three");
+
+    host.resize(20, 3);
+    await waitFor(() => host.grid.size.height === 3 && renderedRows().join("|") === "one|two|three");
+
+    const version = host.grid.version;
+    host.sendKeys("<Esc><C-E>");
+    await waitFor(() => host.grid.version > version);
+    await waitFor(() => renderedRows().join("|") === "one|two|three");
+
+    expect(renderedRows()).toEqual(["one", "two", "three"]);
+    expect(errors).toEqual([]);
+  } finally {
+    await host.dispose();
+  }
+});
+
 test("Neovim :q requests Pi exit instead of reporting an unexpected child exit", async () => {
   if (!Bun.which("nvim")) return;
 
