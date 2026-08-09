@@ -80,6 +80,11 @@ test("a real embedded Neovim owns editing, state synchronization, and shutdown",
     await waitFor(() => host.grid.version > visualFrame);
     expect(stripAnsi(host.grid.render(false)[0])).toContain("test 1234 hello");
     host.sendKeys("<Esc>");
+    await waitFor(() => host.grid.mode === "normal");
+
+    await host.setText("");
+    await waitFor(() => latestText === "" && host.grid.mode.startsWith("insert"));
+    expect(host.grid.cursorShape).toBe("vertical");
 
     expect(errors).toEqual([]);
   } finally {

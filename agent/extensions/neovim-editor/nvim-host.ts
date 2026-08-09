@@ -269,10 +269,10 @@ export class NeovimHost {
     const lines = text.split("\n");
     const cursorLine = cursor === "start" ? 0 : lines.length - 1;
     const cursorColumn = cursor === "start" ? 0 : (lines[cursorLine]?.length ?? 0);
-    return this.setState(lines, cursorLine, cursorColumn);
+    return this.setState(lines, cursorLine, cursorColumn, text.length === 0);
   }
 
-  setState(lines: string[], cursorLine: number, cursorColumn: number): Promise<void> {
+  setState(lines: string[], cursorLine: number, cursorColumn: number, startInsert = false): Promise<void> {
     const normalized = lines.length > 0 ? lines : [""];
     const targetLine = Math.max(0, Math.min(cursorLine, normalized.length - 1));
     const targetColumn = Math.max(0, cursorColumn);
@@ -290,7 +290,7 @@ export class NeovimHost {
       const line = normalized[targetLine] ?? "";
       await this.rpc.request("nvim_exec_lua", [
         SET_STATE_LUA,
-        [normalized, targetLine, stringColumnToByteColumn(line, targetColumn)],
+        [normalized, targetLine, stringColumnToByteColumn(line, targetColumn), startInsert],
       ]);
       this.scheduleStateSync();
     });
