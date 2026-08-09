@@ -39,7 +39,6 @@
               gh
               git
               imagemagick
-              neovim
               nushell
               uv
             ];
