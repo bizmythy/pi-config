@@ -294,7 +294,7 @@ export class NeovimEditor implements EditorComponent {
 
     if (this.onExtensionShortcut?.(data)) return;
 
-    if (this.explicitMatches(data, "app.clipboard.pasteImage")) {
+    if (this.keybindings.matches(data, "app.clipboard.pasteImage")) {
       this.onPasteImage?.();
       return;
     }

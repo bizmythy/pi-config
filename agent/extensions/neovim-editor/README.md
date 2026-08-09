@@ -18,7 +18,8 @@ If startup fails, fix the reported Neovim/configuration error and run `/reload`.
 - Neovim `:q` exits Pi, rather than restarting the embedded Neovim process.
 - Ordinary editor input is passed to Neovim unless its configured action is explicitly owned by Pi.
 - Pi autocomplete remains available for slash commands, command arguments, attachments, extension trigger characters, and forced path completion. Its list is rendered below the Neovim grid.
-- Persistent prompt history and clipboard image insertion continue to operate on the Neovim prompt buffer.
+- `Ctrl+V` uses Pi's standard clipboard handler: images are saved to Pi's temporary file and their path is inserted into the Neovim prompt; plain text falls back to normal clipboard insertion.
+- Persistent prompt history continues to operate on the Neovim prompt buffer.
 
 ## History and programmatic edits
 

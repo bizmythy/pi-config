@@ -14,7 +14,7 @@
   "app.message.copy": "ctrl+x",
   "app.message.followUp": "ctrl+shift+enter",
   "app.message.dequeue": "alt+up",
-  "app.clipboard.pasteImage": "ctrl+shift+v",
+  "app.clipboard.pasteImage": "ctrl+v",
   "tui.input.submit": "ctrl+enter",
   "tui.input.tab": "tab",
   "tui.editor.historyPrevious": "ctrl+up",
