@@ -1,20 +1,10 @@
-import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext, ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 
 const PROFILE_NAMES = ["work", "personal"] as const;
-const BEDROCK_AUTH_ENV_VARS = [
-  "AWS_PROFILE",
-  "AWS_DEFAULT_PROFILE",
-  "AWS_ACCESS_KEY_ID",
-  "AWS_SECRET_ACCESS_KEY",
-  "AWS_SESSION_TOKEN",
-  "AWS_BEARER_TOKEN_BEDROCK",
-  "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
-  "AWS_CONTAINER_CREDENTIALS_FULL_URI",
-  "AWS_WEB_IDENTITY_TOKEN_FILE",
-] as const;
+const PROFILE_REFRESH_TIMEOUT_MS = 1_000;
 type ProfileName = (typeof PROFILE_NAMES)[number];
 
 type AuthStorageInternals = {
@@ -42,9 +32,9 @@ function isProfileName(value: unknown): value is ProfileName {
   return typeof value === "string" && PROFILE_NAMES.includes(value as ProfileName);
 }
 
-async function readJson(path: string): Promise<Record<string, unknown>> {
+function readJson(path: string): Record<string, unknown> {
   try {
-    const parsed: unknown = JSON.parse(await readFile(path, "utf8"));
+    const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
     if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
       return parsed as Record<string, unknown>;
     }
@@ -55,30 +45,30 @@ async function readJson(path: string): Promise<Record<string, unknown>> {
   }
 }
 
-async function ensureProfileFiles(): Promise<void> {
-  await mkdir(profileDirectory(), { recursive: true, mode: 0o700 });
+function ensureProfileFiles(): void {
+  mkdirSync(profileDirectory(), { recursive: true, mode: 0o700 });
   for (const profile of PROFILE_NAMES) {
     const path = profileAuthPath(profile);
     try {
-      await chmod(path, 0o600);
+      chmodSync(path, 0o600);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-      await writeFile(path, "{}\n", { mode: 0o600, flag: "wx" });
+      writeFileSync(path, "{}\n", { mode: 0o600, flag: "wx" });
     }
   }
 }
 
-async function readActiveProfile(): Promise<ProfileName> {
-  const config = (await readJson(profileConfigPath())) as ProfileConfig;
+function readActiveProfile(): ProfileName {
+  const config = readJson(profileConfigPath()) as ProfileConfig;
   return isProfileName(config.activeProfile) ? config.activeProfile : "work";
 }
 
-async function writeActiveProfile(profile: ProfileName): Promise<void> {
+function writeActiveProfile(profile: ProfileName): void {
   const path = profileConfigPath();
-  const config = await readJson(path);
+  const config = readJson(path);
   config.activeProfile = profile;
-  await writeFile(path, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
-  await chmod(path, 0o600);
+  writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
+  chmodSync(path, 0o600);
 }
 
 function getAuthStorage(registry: ModelRegistry): AuthStorageInternals {
@@ -107,36 +97,41 @@ async function closeProviderSessions(): Promise<void> {
   }
 }
 
-async function withBedrockAuthHidden<T>(operation: () => Promise<T>): Promise<T> {
-  const previousValues = new Map<string, string | undefined>();
-  for (const name of BEDROCK_AUTH_ENV_VARS) {
-    previousValues.set(name, process.env[name]);
-    delete process.env[name];
-  }
+function refreshRegistryInBackground(
+  registry: Pick<ModelRegistry, "refresh">,
+  providers: readonly string[],
+  cleanup: () => Promise<void> = closeProviderSessions,
+  timeoutMs = PROFILE_REFRESH_TIMEOUT_MS,
+): void {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  timeout.unref?.();
 
-  try {
-    return await operation();
-  } finally {
-    for (const [name, value] of previousValues) {
-      if (value === undefined) delete process.env[name];
-      else process.env[name] = value;
-    }
-  }
+  // A provider refresh is optional bookkeeping. Never return its promise to a
+  // Pi lifecycle handler: network, credential helpers, or third-party providers
+  // must not be able to leave the TUI half-initialized.
+  void Promise.resolve()
+    .then(cleanup)
+    .then(() =>
+      registry.refresh({
+        allowNetwork: false,
+        providers,
+        signal: controller.signal,
+      }),
+    )
+    .catch(() => {})
+    .finally(() => clearTimeout(timeout));
 }
 
-async function bindProfile(registry: ModelRegistry, profile: ProfileName): Promise<void> {
+function bindProfile(registry: ModelRegistry, profile: ProfileName): void {
   const authStorage = getAuthStorage(registry);
   authStorage.storage.authPath = profileAuthPath(profile);
   authStorage.reload();
-  await closeProviderSessions();
-  // Project extensions may restore ambient AWS credentials before this handler
-  // runs. Hide only Bedrock's auth signals while Pi rebuilds the model registry,
-  // then restore them for shell tools and AWS CLI commands.
-  await withBedrockAuthHidden(() => registry.refresh());
+  refreshRegistryInBackground(registry, providersFor(profile));
 }
 
-async function providersFor(profile: ProfileName): Promise<string[]> {
-  const providers = Object.keys(await readJson(profileAuthPath(profile)));
+function providersFor(profile: ProfileName): string[] {
+  const providers = Object.keys(readJson(profileAuthPath(profile)));
   if (profile === "work") providers.push("azure-foundry");
   return providers.sort();
 }
@@ -148,10 +143,10 @@ function setStatus(ctx: Pick<ExtensionContext, "ui">, profile: ProfileName): voi
 export default function authProfiles(pi: ExtensionAPI) {
   let activeProfile: ProfileName = "work";
 
-  pi.on("session_start", async (_event, ctx) => {
-    await ensureProfileFiles();
-    activeProfile = await readActiveProfile();
-    await bindProfile(ctx.modelRegistry, activeProfile);
+  pi.on("session_start", (_event, ctx) => {
+    ensureProfileFiles();
+    activeProfile = readActiveProfile();
+    bindProfile(ctx.modelRegistry, activeProfile);
     setStatus(ctx, activeProfile);
   });
 
@@ -163,11 +158,11 @@ export default function authProfiles(pi: ExtensionAPI) {
     },
     handler: async (args, ctx) => {
       await ctx.waitForIdle();
-      await ensureProfileFiles();
+      ensureProfileFiles();
 
       const requested = args.trim();
       if (requested === "status") {
-        const providers = await providersFor(activeProfile);
+        const providers = providersFor(activeProfile);
         ctx.ui.notify(
           `Auth profile: ${activeProfile}\nFile: ${profileAuthPath(activeProfile)}\nProviders: ${providers.join(", ") || "none — run /login"}`,
           "info",
@@ -182,20 +177,18 @@ export default function authProfiles(pi: ExtensionAPI) {
         ctx.ui.notify("Usage: /profile [work|personal|status]", "warning");
         return;
       } else {
-        const choices = await Promise.all(
-          PROFILE_NAMES.map(async (profile) => {
-            const providers = await providersFor(profile);
-            return `${profile}${profile === activeProfile ? " (active)" : ""} — ${providers.join(", ") || "no logins"}`;
-          }),
-        );
+        const choices = PROFILE_NAMES.map((profile) => {
+          const providers = providersFor(profile);
+          return `${profile}${profile === activeProfile ? " (active)" : ""} — ${providers.join(", ") || "no logins"}`;
+        });
         const choice = await ctx.ui.select("Select Pi login profile", choices);
         const index = choice === undefined ? -1 : choices.indexOf(choice);
         selected = PROFILE_NAMES[index];
       }
 
       if (!selected || selected === activeProfile) return;
-      await bindProfile(ctx.modelRegistry, selected);
-      await writeActiveProfile(selected);
+      bindProfile(ctx.modelRegistry, selected);
+      writeActiveProfile(selected);
       activeProfile = selected;
       pi.events.emit("auth-profile:changed", { profile: selected });
       setStatus(ctx, activeProfile);
@@ -204,4 +197,4 @@ export default function authProfiles(pi: ExtensionAPI) {
   });
 }
 
-export const _test = { withBedrockAuthHidden };
+export const _test = { refreshRegistryInBackground };

@@ -1,49 +1,48 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { _test } from "../../extensions/auth-profiles";
 
-const ORIGINAL_AWS_PROFILE = process.env.AWS_PROFILE;
-const ORIGINAL_AWS_DEFAULT_PROFILE = process.env.AWS_DEFAULT_PROFILE;
-const ORIGINAL_AWS_ACCESS_KEY_ID = process.env.AWS_ACCESS_KEY_ID;
-
-afterEach(() => {
-  if (ORIGINAL_AWS_PROFILE === undefined) delete process.env.AWS_PROFILE;
-  else process.env.AWS_PROFILE = ORIGINAL_AWS_PROFILE;
-
-  if (ORIGINAL_AWS_DEFAULT_PROFILE === undefined) delete process.env.AWS_DEFAULT_PROFILE;
-  else process.env.AWS_DEFAULT_PROFILE = ORIGINAL_AWS_DEFAULT_PROFILE;
-
-  if (ORIGINAL_AWS_ACCESS_KEY_ID === undefined) delete process.env.AWS_ACCESS_KEY_ID;
-  else process.env.AWS_ACCESS_KEY_ID = ORIGINAL_AWS_ACCESS_KEY_ID;
-});
-
 describe("auth profile refresh", () => {
-  test("temporarily hides Bedrock credentials and restores them", async () => {
-    process.env.AWS_PROFILE = "buildos-test";
-    process.env.AWS_DEFAULT_PROFILE = "buildos-default-test";
-    process.env.AWS_ACCESS_KEY_ID = "test-access-key";
-
-    await _test.withBedrockAuthHidden(async () => {
-      expect(process.env.AWS_PROFILE).toBeUndefined();
-      expect(process.env.AWS_DEFAULT_PROFILE).toBeUndefined();
-      expect(process.env.AWS_ACCESS_KEY_ID).toBeUndefined();
+  test("runs provider-scoped offline refresh without returning work to startup", async () => {
+    let resolveOptions: (options: unknown) => void = () => {};
+    const options = new Promise<unknown>((resolve) => {
+      resolveOptions = resolve;
     });
+    const registry = {
+      refresh(received: unknown) {
+        resolveOptions(received);
+        return Promise.resolve({ aborted: false, errors: new Map() });
+      },
+    };
 
-    expect(process.env.AWS_PROFILE).toBe("buildos-test");
-    expect(process.env.AWS_DEFAULT_PROFILE).toBe("buildos-default-test");
-    expect(process.env.AWS_ACCESS_KEY_ID).toBe("test-access-key");
+    expect(_test.refreshRegistryInBackground(registry, ["openai-codex"], async () => {})).toBeUndefined();
+    expect(await options).toMatchObject({
+      allowNetwork: false,
+      providers: ["openai-codex"],
+      signal: expect.any(AbortSignal),
+    });
   });
 
-  test("restores credentials when refresh fails", async () => {
-    process.env.AWS_PROFILE = "buildos-test";
-    process.env.AWS_DEFAULT_PROFILE = "buildos-default-test";
+  test("aborts a background refresh that exceeds its deadline", async () => {
+    let resolveAborted: (aborted: boolean) => void = () => {};
+    const aborted = new Promise<boolean>((resolve) => {
+      resolveAborted = resolve;
+    });
+    const registry = {
+      refresh(options: { signal: AbortSignal }) {
+        return new Promise<{ aborted: boolean; errors: Map<string, Error> }>((resolve) => {
+          options.signal.addEventListener(
+            "abort",
+            () => {
+              resolveAborted(options.signal.aborted);
+              resolve({ aborted: true, errors: new Map() });
+            },
+            { once: true },
+          );
+        });
+      },
+    };
 
-    await expect(
-      _test.withBedrockAuthHidden(async () => {
-        throw new Error("refresh failed");
-      }),
-    ).rejects.toThrow("refresh failed");
-
-    expect(process.env.AWS_PROFILE).toBe("buildos-test");
-    expect(process.env.AWS_DEFAULT_PROFILE).toBe("buildos-default-test");
+    expect(_test.refreshRegistryInBackground(registry, [], async () => {}, 1)).toBeUndefined();
+    expect(await aborted).toBeTrue();
   });
 });
