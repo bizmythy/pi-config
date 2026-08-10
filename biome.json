@@ -7,7 +7,15 @@
   },
   "files": {
     "ignoreUnknown": true,
-    "includes": ["**/*.ts", "!bun/**", "!.git/**", "!.pi/**", "!agent/git/**", "!agent/sessions/**"]
+    "includes": [
+      "**/*.ts",
+      "!bun/**",
+      "!.git/**",
+      "!.pi/**",
+      "!agent/git/**",
+      "!agent/sessions/**",
+      "!agent/extensions/herdr-agent-state.ts"
+    ]
   },
   "formatter": {
     "enabled": true,
