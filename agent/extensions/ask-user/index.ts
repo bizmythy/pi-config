@@ -108,6 +108,7 @@ type AskResponse =
       kind: "selection";
       selections: string[];
       comment?: string;
+      additionalDetails?: string;
     }
   | {
       kind: "freeform";
@@ -185,21 +186,29 @@ function createFreeformResponse(text: string | null | undefined): AskResponse | 
   return trimmed ? { kind: "freeform", text: trimmed } : null;
 }
 
-function createSelectionResponse(selections: string[], comment?: string | null): AskResponse | null {
+function createSelectionResponse(
+  selections: string[],
+  options: { comment?: string | null; additionalDetails?: string | null } = {},
+): AskResponse | null {
   const normalizedSelections = selections.map((selection) => selection.trim()).filter(Boolean);
   if (normalizedSelections.length === 0) return null;
 
-  const normalizedComment = normalizeOptionalComment(comment);
-  return normalizedComment
-    ? { kind: "selection", selections: normalizedSelections, comment: normalizedComment }
-    : { kind: "selection", selections: normalizedSelections };
+  const comment = normalizeOptionalComment(options.comment);
+  const additionalDetails = normalizeOptionalComment(options.additionalDetails);
+  return {
+    kind: "selection",
+    selections: normalizedSelections,
+    ...(comment ? { comment } : {}),
+    ...(additionalDetails ? { additionalDetails } : {}),
+  };
 }
 
 function formatResponseSummary(response: AskResponse): string {
   if (response.kind === "freeform") return response.text;
 
   const selections = response.selections.join(", ");
-  return response.comment ? `${selections} — ${response.comment}` : selections;
+  const additionalText = response.additionalDetails ?? response.comment;
+  return additionalText ? `${selections} — ${additionalText}` : selections;
 }
 
 function buildCommentPrompt(prompt: string, selections: string[]): string {
@@ -358,13 +367,15 @@ function resolveShortcut(
     const normalized = normalizeShortcutSpec(raw);
     if (normalized === undefined) continue; // not provided, fall through
     if (normalized === null) return DISABLED_SHORTCUT; // explicit disable
+    // Tab is permanently reserved for adding details to the selected option(s).
+    if (normalized === "tab") continue;
     if (isValidShortcutSpec(normalized)) return buildShortcut(normalized);
     // Invalid spec: silently fall through to next candidate.
   }
   return DISABLED_SHORTCUT;
 }
 
-type AskMode = "select" | "freeform" | "comment";
+type AskMode = "select" | "freeform" | "comment" | "details";
 
 const ASK_OVERLAY_MAX_HEIGHT_RATIO = 0.85;
 const ASK_OVERLAY_MIN_RENDER_LINES = 8;
@@ -401,17 +412,11 @@ function getOverlayMaxRenderLinesForRows(rows: number): number {
 }
 
 function matchesSelectUp(data: string, keybindings: KeybindingsManager): boolean {
-  return (
-    keybindings.matches(data, "tui.select.up") ||
-    matchesKey(data, Key.shift("tab")) ||
-    matchesKey(data, VIM_SELECT_UP_KEY)
-  );
+  return keybindings.matches(data, "tui.select.up") || matchesKey(data, VIM_SELECT_UP_KEY);
 }
 
 function matchesSelectDown(data: string, keybindings: KeybindingsManager): boolean {
-  return (
-    keybindings.matches(data, "tui.select.down") || matchesKey(data, Key.tab) || matchesKey(data, VIM_SELECT_DOWN_KEY)
-  );
+  return keybindings.matches(data, "tui.select.down") || matchesKey(data, VIM_SELECT_DOWN_KEY);
 }
 
 function buildCustomUIOptions(
@@ -467,6 +472,7 @@ class MultiSelectList implements Component {
 
   public onCancel?: () => void;
   public onSubmit?: (result: string[]) => void;
+  public onSubmitWithDetails?: (result: string[]) => void;
   public onEnterFreeform?: () => void;
 
   constructor(
@@ -535,7 +541,23 @@ class MultiSelectList implements Component {
     this.invalidate();
   }
 
+  private getSelectedTitles(): string[] {
+    const selectedTitles = Array.from(this.checked)
+      .sort((a, b) => a - b)
+      .map((i) => this.options[i]?.title)
+      .filter((title): title is string => !!title);
+
+    const fallback = this.options[this.selectedIndex]?.title;
+    return selectedTitles.length > 0 ? selectedTitles : fallback ? [fallback] : [];
+  }
+
   handleInput(data: string): void {
+    if (matchesKey(data, Key.tab)) {
+      const result = this.getSelectedTitles();
+      if (result.length > 0) this.onSubmitWithDetails?.(result);
+      return;
+    }
+
     if (this.keybindings.matches(data, "tui.select.cancel")) {
       this.onCancel?.();
       return;
@@ -599,14 +621,7 @@ class MultiSelectList implements Component {
         return;
       }
 
-      const selectedTitles = Array.from(this.checked)
-        .sort((a, b) => a - b)
-        .map((i) => this.options[i]?.title)
-        .filter((t): t is string => !!t);
-
-      const fallback = this.options[this.selectedIndex]?.title;
-      const result = selectedTitles.length > 0 ? selectedTitles : fallback ? [fallback] : [];
-
+      const result = this.getSelectedTitles();
       if (result.length > 0) this.onSubmit?.(result);
       else this.onCancel?.();
     }
@@ -741,6 +756,7 @@ class WrappedSingleSelectList implements Component {
 
   public onCancel?: () => void;
   public onSubmit?: (result: string) => void;
+  public onSubmitWithDetails?: (result: string) => void;
   public onEnterFreeform?: () => void;
 
   constructor(
@@ -919,7 +935,7 @@ class WrappedSingleSelectList implements Component {
     if (this.isCommentToggleRow(this.selectedIndex, filteredOptions)) {
       md += "## Additional context\n\n";
       md += `Currently: **${this.commentEnabled ? "Enabled" : "Disabled"}**\n\n`;
-      md += "Turn this on when the selected option needs extra explanation before the tool submits.\n";
+      md += "Turn this on when the selected option needs an optional comment before the tool submits.\n";
     } else if (this.isFreeformRow(this.selectedIndex, filteredOptions)) {
       md += "## Custom response\n\n";
       md += "Open the editor to write **any** answer.\n\n";
@@ -938,7 +954,7 @@ class WrappedSingleSelectList implements Component {
         } else {
           md += "*No additional details provided for this option.*\n";
         }
-        md += `\n---\n\nPress \`Enter\` to select this option.\n`;
+        md += `\n---\n\nPress \`Enter\` to select this option, or \`Tab\` to add details.\n`;
         if (this.searchQuery) {
           md += `\n> Filter: \`${this.searchQuery}\`\n`;
         }
@@ -969,6 +985,13 @@ class WrappedSingleSelectList implements Component {
   }
 
   handleInput(data: string): void {
+    const filteredOptions = this.getFilteredOptions();
+    if (matchesKey(data, Key.tab)) {
+      const result = filteredOptions[this.selectedIndex]?.title;
+      if (result) this.onSubmitWithDetails?.(result);
+      return;
+    }
+
     if (this.searchQuery && matchesKey(data, Key.escape)) {
       this.setSearchQuery("");
       return;
@@ -979,13 +1002,12 @@ class WrappedSingleSelectList implements Component {
       return;
     }
 
+    const count = this.getItemCount(filteredOptions);
+
     if (this.allowComment && !this.commentToggle.disabled && this.commentToggle.matches(data)) {
       this.toggleComment();
       return;
     }
-
-    const filteredOptions = this.getFilteredOptions();
-    const count = this.getItemCount(filteredOptions);
 
     if (matchesSelectUp(data, this.keybindings) && count > 0) {
       this.selectedIndex = this.selectedIndex === 0 ? count - 1 : this.selectedIndex - 1;
@@ -1096,6 +1118,7 @@ class AskComponent extends Container {
   private pendingSelections: string[] = [];
   private freeformDraft = "";
   private commentDraft = "";
+  private detailsDraft = "";
   private promptScrollOffset = 0;
   private promptMaxScrollOffset = 0;
   private promptViewportRows = 0;
@@ -1121,7 +1144,7 @@ class AskComponent extends Container {
   }
   set focused(value: boolean) {
     this._focused = value;
-    if (this.editor && (this.mode === "freeform" || this.mode === "comment")) {
+    if (this.editor && (this.mode === "freeform" || this.mode === "comment" || this.mode === "details")) {
       (this.editor as any).focused = value;
     }
   }
@@ -1390,13 +1413,13 @@ class AskComponent extends Container {
 
   private getMinimumModeRows(): number {
     if (this.mode === "freeform") return 5;
-    if (this.mode === "comment") return 6;
+    if (this.mode === "comment" || this.mode === "details") return 6;
     return 3;
   }
 
   private getPreferredModeRows(): number {
     if (this.mode === "freeform") return 10;
-    if (this.mode === "comment") return 11;
+    if (this.mode === "comment" || this.mode === "details") return 11;
     return 8;
   }
 
@@ -1427,7 +1450,7 @@ class AskComponent extends Container {
   }
 
   private buildEditorModeHeaderLines(width: number): string[] {
-    if (this.mode === "comment") {
+    if (this.mode === "comment" || this.mode === "details") {
       const selectedLabel = this.pendingSelections.length === 1 ? "Selected option:" : "Selected options:";
       return [
         ...new Text(this.theme.fg("accent", this.theme.bold(selectedLabel)), 1, 0).render(width),
@@ -1568,7 +1591,8 @@ class AskComponent extends Container {
 
   private updateStaticText(): void {
     const theme = this.theme;
-    const title = this.mode === "comment" ? "Optional comment" : "Question";
+    const title =
+      this.mode === "details" ? "Additional details" : this.mode === "comment" ? "Optional comment" : "Question";
     this.titleText.setText(theme.fg("accent", theme.bold(title)));
     this.questionText.setText(theme.fg("text", theme.bold(this.question)));
     if (this.contextComponent && this.context) {
@@ -1590,14 +1614,15 @@ class AskComponent extends Container {
         : null;
     const promptScrollHint =
       this.displayMode === "overlay" || this.contextExpanded ? literalHint(theme, "PgUp/PgDn", "prompt") : null;
+    const detailsHint = literalHint(theme, "tab", "add details");
     const commentHint =
       this.allowComment && !this.shortcuts.commentToggle.disabled
-        ? literalHint(theme, this.shortcuts.commentToggle.spec, "toggle context")
+        ? literalHint(theme, this.shortcuts.commentToggle.spec, "toggle comment")
         : null;
     const contextHint = this.contextIsCollapsible
       ? literalHint(theme, this.getContextToggleKey(), this.contextExpanded ? "collapse context" : "expand context")
       : null;
-    if (this.mode === "freeform" || this.mode === "comment") {
+    if (this.mode === "freeform" || this.mode === "comment" || this.mode === "details") {
       const alternateCancelKeys = this.keybindings
         .getKeys("tui.select.cancel")
         .filter((key) => key !== "escape" && key !== "esc");
@@ -1618,6 +1643,7 @@ class AskComponent extends Container {
       const hints = [
         literalHint(theme, "↑↓", "navigate"),
         literalHint(theme, "space", "toggle"),
+        detailsHint,
         commentHint,
         contextHint,
         promptScrollHint,
@@ -1634,6 +1660,7 @@ class AskComponent extends Container {
         .filter((key) => key !== "escape" && key !== "esc");
       const hints = [
         literalHint(theme, "type", "filter"),
+        detailsHint,
         commentHint,
         contextHint,
         promptScrollHint,
@@ -1663,6 +1690,7 @@ class AskComponent extends Container {
       this.shortcuts.commentToggle,
     );
     list.onSubmit = (result) => this.handleSelectionSubmit([result], list.isCommentEnabled());
+    list.onSubmitWithDetails = (result) => this.handleSelectionSubmitWithDetails([result]);
     list.onCancel = () => this.onDone(null);
     list.onEnterFreeform = () => this.showFreeformMode();
 
@@ -1683,6 +1711,7 @@ class AskComponent extends Container {
     );
     list.onCancel = () => this.onDone(null);
     list.onSubmit = (result) => this.handleSelectionSubmit(result, list.isCommentEnabled());
+    list.onSubmitWithDetails = (result) => this.handleSelectionSubmitWithDetails(result);
     list.onEnterFreeform = () => this.showFreeformMode();
 
     this.multiSelectList = list;
@@ -1710,6 +1739,8 @@ class AskComponent extends Container {
       this.freeformDraft = currentText;
     } else if (this.mode === "comment") {
       this.commentDraft = currentText;
+    } else if (this.mode === "details") {
+      this.detailsDraft = currentText;
     }
   }
 
@@ -1732,6 +1763,12 @@ class AskComponent extends Container {
     this.onDone(createSelectionResponse(selections));
   }
 
+  private handleSelectionSubmitWithDetails(selections: string[]): void {
+    this.pendingSelections = selections;
+    this.detailsDraft = "";
+    this.showDetailsMode();
+  }
+
   private handleEditorSubmit(text: string): void {
     if (this.mode === "freeform") {
       this.onDone(createFreeformResponse(text));
@@ -1740,12 +1777,18 @@ class AskComponent extends Container {
 
     if (this.mode === "comment") {
       this.commentDraft = text;
-      this.onDone(createSelectionResponse(this.pendingSelections, text));
+      this.onDone(createSelectionResponse(this.pendingSelections, { comment: text }));
+      return;
+    }
+
+    if (this.mode === "details") {
+      this.detailsDraft = text;
+      this.onDone(createSelectionResponse(this.pendingSelections, { additionalDetails: text }));
     }
   }
 
   private showSelectMode(): void {
-    if (this.mode === "freeform" || this.mode === "comment") {
+    if (this.mode === "freeform" || this.mode === "comment" || this.mode === "details") {
       this.saveEditorDraft();
     }
 
@@ -1765,7 +1808,7 @@ class AskComponent extends Container {
   }
 
   private showFreeformMode(): void {
-    if (this.mode === "comment") {
+    if (this.mode === "comment" || this.mode === "details") {
       this.saveEditorDraft();
     }
 
@@ -1786,7 +1829,7 @@ class AskComponent extends Container {
   }
 
   private showCommentMode(): void {
-    if (this.mode === "freeform") {
+    if (this.mode === "freeform" || this.mode === "details") {
       this.saveEditorDraft();
     }
 
@@ -1795,6 +1838,29 @@ class AskComponent extends Container {
 
     const editor = this.ensureEditor();
     this.setEditorText(this.commentDraft);
+    (editor as any).focused = this._focused;
+
+    const selectedLabel = this.pendingSelections.length === 1 ? "Selected option:" : "Selected options:";
+    this.modeContainer.addChild(new Text(this.theme.fg("accent", this.theme.bold(selectedLabel)), 1, 0));
+    this.modeContainer.addChild(new Text(this.theme.fg("text", this.pendingSelections.join(", ")), 1, 0));
+    this.modeContainer.addChild(new Spacer(1));
+    this.modeContainer.addChild(editor);
+
+    this.updateHelpText();
+    this.invalidate();
+    this.tui.requestRender();
+  }
+
+  private showDetailsMode(): void {
+    if (this.mode === "freeform" || this.mode === "comment") {
+      this.saveEditorDraft();
+    }
+
+    this.mode = "details";
+    this.modeContainer.clear();
+
+    const editor = this.ensureEditor();
+    this.setEditorText(this.detailsDraft);
     (editor as any).focused = this._focused;
 
     const selectedLabel = this.pendingSelections.length === 1 ? "Selected option:" : "Selected options:";
@@ -1869,7 +1935,7 @@ class AskComponent extends Container {
       this.tui.requestRender();
       return;
     }
-    if (this.mode === "freeform" || this.mode === "comment") {
+    if (this.mode === "freeform" || this.mode === "comment" || this.mode === "details") {
       if (matchesKey(data, Key.escape)) {
         this.showSelectMode();
         return;
@@ -1934,7 +2000,7 @@ async function askViaDialogs(
       "Optional comment (press Enter to skip)...",
       dialogOpts,
     )) as string | undefined;
-    return createSelectionResponse(selections, comment);
+    return createSelectionResponse(selections, { comment });
   }
 
   const selectOptions = options.map((o) => o.title);
@@ -1958,7 +2024,7 @@ async function askViaDialogs(
     "Optional comment (press Enter to skip)...",
     dialogOpts,
   )) as string | undefined;
-  return createSelectionResponse([selected], comment);
+  return createSelectionResponse([selected], { comment });
 }
 
 export default function (pi: ExtensionAPI) {
@@ -1968,7 +2034,7 @@ export default function (pi: ExtensionAPI) {
     name: "ask_user",
     label: "Ask User",
     description:
-      "Ask the user a question with optional multiple-choice answers. Use this to gather information interactively. Ask exactly one focused question per call. Before calling, gather context with tools (read/web/ref) and pass a short summary via the context field.",
+      "Ask the user a question with optional multiple-choice answers. The user can always press Tab to add details to a selected option. Use this to gather information interactively. Ask exactly one focused question per call. Before calling, gather context with tools (read/web/ref) and pass a short summary via the context field.",
     promptSnippet:
       "Ask the user one focused question with optional multiple-choice answers to gather information interactively",
     promptGuidelines: [
@@ -2330,6 +2396,9 @@ export default function (pi: ExtensionAPI) {
             const desc = opt.description ? ` — ${opt.description}` : "";
             const marker = selectedTitles.has(opt.title) ? theme.fg("success", "●") : theme.fg("dim", "○");
             text += `\n  ${marker} ${theme.fg("dim", opt.title)}${theme.fg("dim", desc)}`;
+          }
+          if (response.additionalDetails) {
+            text += `\n${theme.fg("dim", "Additional details:")} ${theme.fg("dim", response.additionalDetails)}`;
           }
           if (response.comment) {
             text += `\n${theme.fg("dim", "Comment:")} ${theme.fg("dim", response.comment)}`;

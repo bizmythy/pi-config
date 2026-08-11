@@ -73,6 +73,8 @@ The registered tool name is:
 | `commentToggleKey` | `string?` | env var or `"ctrl+g"` | Shortcut for toggling the optional comment/extra-context row when `allowComment: true`. Pass `"off"` to disable. |
 | `timeout` | `number?` | — | Auto-dismiss after N ms and return `null` if the prompt times out |
 
+Regardless of tool parameters, the user can press `Tab` on a focused option to keep that selection and open an editor for additional details. This capability is user-controlled and cannot be disabled by the agent. It is separate from `allowComment`, which retains its existing optional-comment toggle behavior.
+
 ## Example usage shape
 
 ```json
@@ -128,6 +130,8 @@ Effective order:
 
 ### Optional comments
 
+This agent-controlled feature is separate from the always-available `Tab` shortcut for adding details to a selection.
+
 Effective order:
 
 1. Per-call `allowComment` parameter (if provided)
@@ -151,10 +155,11 @@ While an `ask_user` prompt is open:
 | Key | Action |
 |-----|--------|
 | `alt+o` (configurable via `overlayToggleKey`) | Hide/show the overlay popup so you can read the agent's prior output. Available in `overlay` mode only. The first time you hide it, a notification reminds you which key brings it back. |
-| `ctrl+g` (configurable via `commentToggleKey`) | Toggle the optional comment/extra-context row (when `allowComment: true`). |
+| `Tab` | Keep the focused option (or checked options) selected and open an editor for additional details. Always available; tool parameters cannot disable or rebind it. |
+| `ctrl+g` (configurable via `commentToggleKey`) | Toggle the separate optional comment/extra-context row (when `allowComment: true`). |
 | `ctrl+e` | Expand or collapse oversized context while choosing an option. If another configured ask shortcut owns it, the prompt shows `ctrl+x` or `ctrl+y` instead. |
-| `enter` | Confirm the focused option, submit a freeform response, or submit/skip an optional comment. |
-| `esc` | Clear the search filter, exit freeform/comment mode, or cancel the prompt. |
+| `enter` | Confirm the focused option, submit a freeform response, submit additional details, or submit/skip an optional comment. |
+| `esc` | Clear the search filter, exit freeform/comment/additional-details mode, or cancel the prompt. |
 | `↑` / `↓`, `ctrl+k` / `ctrl+j` | Navigate options. `ctrl+k` / `ctrl+j` (vim-style) work while typing in searchable prompts without disturbing the filter. |
 
 If you prefer never to see the overlay, set `displayMode: "inline"` per call or `PI_ASK_USER_DISPLAY_MODE=inline` globally.
@@ -177,7 +182,7 @@ All tool results include a structured `details` object for rendering and session
 
 ```typescript
 type AskResponse =
-  | { kind: "selection"; selections: string[]; comment?: string }
+  | { kind: "selection"; selections: string[]; comment?: string; additionalDetails?: string }
   | { kind: "freeform"; text: string };
 
 interface AskToolDetails {
