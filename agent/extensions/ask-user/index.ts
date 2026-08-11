@@ -6,7 +6,7 @@
  */
 
 import { fileURLToPath } from "node:url";
-import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionUIContext, Theme } from "@earendil-works/pi-coding-agent";
 import { getMarkdownTheme } from "@earendil-works/pi-coding-agent";
 import {
   type Component,
@@ -19,6 +19,7 @@ import {
   Key,
   type Keybinding,
   type KeybindingsManager,
+  type KeyId,
   Markdown,
   type MarkdownTheme,
   matchesKey,
@@ -353,7 +354,7 @@ function buildShortcut(spec: string): ResolvedShortcut {
   return {
     disabled: false,
     spec,
-    matches: (data: string) => matchesKey(data, spec as any),
+    matches: (data: string) => matchesKey(data, spec as KeyId),
   };
 }
 
@@ -667,7 +668,8 @@ class MultiSelectList implements Component {
         continue;
       }
 
-      const option = this.options[i]!;
+      const option = this.options[i];
+      if (!option) continue;
 
       const checkbox = this.checked.has(i) ? theme.fg("success", "[✓]") : theme.fg("dim", "[ ]");
       const num = theme.fg("dim", `${i + 1}.`);
@@ -1145,7 +1147,7 @@ class AskComponent extends Container {
   set focused(value: boolean) {
     this._focused = value;
     if (this.editor && (this.mode === "freeform" || this.mode === "comment" || this.mode === "details")) {
-      (this.editor as any).focused = value;
+      this.editor.focused = value;
     }
   }
 
@@ -1374,7 +1376,7 @@ class AskComponent extends Container {
         .filter((shortcut) => !shortcut.disabled)
         .map((shortcut) => shortcut.spec),
     );
-    return CONTEXT_TOGGLE_KEYS.find((key) => !reserved.has(key)) ?? CONTEXT_TOGGLE_KEYS[0]!;
+    return CONTEXT_TOGGLE_KEYS.find((key) => !reserved.has(key)) ?? Key.ctrl("e");
   }
 
   private buildContextDisplayLines(fullContextLines: string[], width: number): string[] {
@@ -1731,10 +1733,7 @@ class AskComponent extends Container {
 
   private saveEditorDraft(): void {
     if (!this.editor) return;
-    const getText = (this.editor as any).getText;
-    if (typeof getText !== "function") return;
-
-    const currentText = String(getText.call(this.editor) ?? "");
+    const currentText = this.editor.getText();
     if (this.mode === "freeform") {
       this.freeformDraft = currentText;
     } else if (this.mode === "comment") {
@@ -1745,11 +1744,7 @@ class AskComponent extends Container {
   }
 
   private setEditorText(text: string): void {
-    const editor = this.ensureEditor();
-    const setText = (editor as any).setText;
-    if (typeof setText === "function") {
-      setText.call(editor, text);
-    }
+    this.ensureEditor().setText(text);
   }
 
   private handleSelectionSubmit(selections: string[], wantsComment: boolean): void {
@@ -1817,7 +1812,7 @@ class AskComponent extends Container {
 
     const editor = this.ensureEditor();
     this.setEditorText(this.freeformDraft);
-    (editor as any).focused = this._focused;
+    editor.focused = this._focused;
 
     this.modeContainer.addChild(new Text(this.theme.fg("accent", this.theme.bold("Custom response")), 1, 0));
     this.modeContainer.addChild(new Spacer(1));
@@ -1838,7 +1833,7 @@ class AskComponent extends Container {
 
     const editor = this.ensureEditor();
     this.setEditorText(this.commentDraft);
-    (editor as any).focused = this._focused;
+    editor.focused = this._focused;
 
     const selectedLabel = this.pendingSelections.length === 1 ? "Selected option:" : "Selected options:";
     this.modeContainer.addChild(new Text(this.theme.fg("accent", this.theme.bold(selectedLabel)), 1, 0));
@@ -1861,7 +1856,7 @@ class AskComponent extends Container {
 
     const editor = this.ensureEditor();
     this.setEditorText(this.detailsDraft);
-    (editor as any).focused = this._focused;
+    editor.focused = this._focused;
 
     const selectedLabel = this.pendingSelections.length === 1 ? "Selected option:" : "Selected options:";
     this.modeContainer.addChild(new Text(this.theme.fg("accent", this.theme.bold(selectedLabel)), 1, 0));
@@ -1928,7 +1923,7 @@ class AskComponent extends Container {
   }
 
   handleInput(data: string): void {
-    if (matchesKey(data, this.getContextToggleKey() as any) && this.toggleContext()) {
+    if (matchesKey(data, this.getContextToggleKey() as KeyId) && this.toggleContext()) {
       return;
     }
     if (this.handlePromptScrollInput(data)) {
@@ -1967,7 +1962,7 @@ class AskComponent extends Container {
  * ctx.ui.custom() returns undefined in RPC mode, so we degrade gracefully.
  */
 async function askViaDialogs(
-  ui: { select: Function; input: Function },
+  ui: Pick<ExtensionUIContext, "select" | "input">,
   question: string,
   context: string | undefined,
   options: QuestionOption[],
