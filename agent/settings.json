@@ -7,7 +7,6 @@
   "defaultThinkingLevel": "high",
   "packages": [
     "npm:pi-web-access",
-    "npm:pi-ask-user",
     {
       "source": "npm:pi-subagents",
       "skills": [],
