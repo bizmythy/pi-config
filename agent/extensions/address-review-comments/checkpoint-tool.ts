@@ -4,6 +4,7 @@ import { type ExtensionAPI, type ExtensionContext, getMarkdownTheme } from "@ear
 import { Markdown, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { writeReplyRequest } from "./artifacts.js";
+import { appendReplyAttribution, createReplyRequest } from "./attribution.js";
 import { checkpointAction, ReviewCheckpointDialog } from "./checkpoint-dialog.js";
 import { CHECKPOINT_ENTRY_TYPE, CHECKPOINT_TOOL_NAME, REVIEW_COMMAND } from "./constants.js";
 import { GitHubClient, ReviewThreadResolveError } from "./github.js";
@@ -134,6 +135,15 @@ export function registerCheckpointTool(pi: ExtensionAPI, controller: CheckpointC
         };
       }
 
+      if (!workflow.githubUsername) {
+        throw new Error("The review workflow is missing its authenticated GitHub username. Run /reload to retry.");
+      }
+      const replyRequest = createReplyRequest(
+        checkpoint.threadId,
+        checkpoint.draftReply,
+        action.resolveThread,
+        workflow.githubUsername,
+      );
       onUpdate?.({
         content: [
           {
@@ -143,17 +153,13 @@ export function registerCheckpointTool(pi: ExtensionAPI, controller: CheckpointC
         ],
         details: { phase: "submitting", selectedOption, threadId: checkpoint.threadId },
       });
-      await writeReplyRequest(workflow.artifactDirectory || path.dirname(workflow.fetchResponsePath), {
-        thread_id: checkpoint.threadId,
-        comment: checkpoint.draftReply,
-        resolve: action.resolveThread,
-      });
+      await writeReplyRequest(workflow.artifactDirectory || path.dirname(workflow.fetchResponsePath), replyRequest);
       const client = new GitHubClient((command, args, options) => pi.exec(command, args, options), workflow.repoRoot);
       let response: ReplyResponse;
       try {
         response = await client.submitReply(
           checkpoint.threadId,
-          checkpoint.draftReply,
+          replyRequest.comment,
           action.resolveThread,
           signal,
           (reply) => {
@@ -231,7 +237,9 @@ export function registerCheckpointTool(pi: ExtensionAPI, controller: CheckpointC
       const reviewer = typeof args.reviewer === "string" ? `@${args.reviewer}` : undefined;
       const summary =
         typeof args.checkpointMarkdown === "string" ? args.checkpointMarkdown : "No checkpoint summary provided.";
-      const reply = typeof args.draftReply === "string" ? args.draftReply : "";
+      const draftReply = typeof args.draftReply === "string" ? args.draftReply : "";
+      const githubUsername = controller.getWorkflow()?.githubUsername;
+      const reply = githubUsername ? appendReplyAttribution(draftReply, githubUsername) : draftReply;
       const recommended = isRecommendedAction(args.recommendedAction) ? args.recommendedAction : undefined;
       const metadata = [
         `**Location:** \`${location}\``,

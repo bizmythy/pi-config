@@ -33,6 +33,7 @@ export interface FetchRequest {
 
 export interface FetchResponse {
   repository: string;
+  github_username: string;
   pull_request: PullRequestRecord;
   linear_issues: string[];
   authored_diff_path: string;
@@ -68,6 +69,7 @@ export interface ReplyResponse {
 export interface WorkflowState {
   repoRoot: string;
   repository: string;
+  githubUsername: string;
   artifactDirectory: string;
   commandRequestPath: string;
   fetchRequestPath: string;

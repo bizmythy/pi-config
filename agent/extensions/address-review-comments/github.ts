@@ -209,6 +209,12 @@ export class GitHubClient {
     return envelope.data;
   }
 
+  async getAuthenticatedUsername(signal?: AbortSignal): Promise<string> {
+    const username = (await this.gh(["api", "user", "--jq", ".login"], { signal })).trim();
+    if (!username) throw new Error("Unable to determine the authenticated GitHub username.");
+    return username;
+  }
+
   async detectRepository(signal?: AbortSignal): Promise<string> {
     const repository = (
       await this.gh(["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"], {
@@ -358,6 +364,28 @@ export class GitHubClient {
       return { thread_id: threadId, reply, resolved_thread: resolvedThread };
     } catch (error) {
       throw new ReviewThreadResolveError(reply, error);
+    }
+  }
+}
+
+export class GitHubUsernameCache {
+  private username: string | undefined;
+  private pending: Promise<string> | undefined;
+
+  reset(username?: string): void {
+    this.username = username;
+    this.pending = undefined;
+  }
+
+  async get(client: GitHubClient, signal?: AbortSignal): Promise<string> {
+    if (this.username) return this.username;
+    this.pending ??= client.getAuthenticatedUsername(signal);
+    try {
+      this.username = await this.pending;
+      return this.username;
+    } catch (error) {
+      this.pending = undefined;
+      throw error;
     }
   }
 }

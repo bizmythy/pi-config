@@ -17,7 +17,7 @@ import {
   STATUS_ID,
 } from "./constants.js";
 import { checkoutExplicitPull, currentBranch, resolveRepositoryRoot, shortHead } from "./git.js";
-import { fetchGitHubReviewData, GitHubClient } from "./github.js";
+import { fetchGitHubReviewData, GitHubClient, GitHubUsernameCache } from "./github.js";
 import { makeAgentPrompt, summarizeFetch } from "./prompt.js";
 import { createLazyToolActivation } from "./tool-activation.js";
 import type { FetchResponse, WorkflowState } from "./types.js";
@@ -93,6 +93,7 @@ export default function addressReviewCommentsExtension(pi: ExtensionAPI): void {
   let activeWorkflow: WorkflowState | undefined;
   let terminalThreadIds = new Set<string>();
   let setToolEnabled!: (enabled: boolean) => void;
+  const githubUsernameCache = new GitHubUsernameCache();
 
   const updateStatus = (ctx: ExtensionContext) => {
     if (!activeWorkflow) {
@@ -161,7 +162,11 @@ export default function addressReviewCommentsExtension(pi: ExtensionAPI): void {
       const exec = commandExecutor(pi);
       const repositoryRoot = await resolveRepositoryRoot(exec, ctx.cwd);
       const client = new GitHubClient(exec, repositoryRoot);
-      const [repository, branch] = await Promise.all([client.detectRepository(), currentBranch(exec, repositoryRoot)]);
+      const [repository, branch, githubUsername] = await Promise.all([
+        client.detectRepository(),
+        currentBranch(exec, repositoryRoot),
+        githubUsernameCache.get(client),
+      ]);
       const selector = parsed.prNumber ?? branch;
       const pull = await client.getPullRequest(repository, selector);
       progress.complete("metadata");
@@ -179,6 +184,7 @@ export default function addressReviewCommentsExtension(pi: ExtensionAPI): void {
       const unresolved = githubData.threads.filter((thread) => !thread.is_resolved);
       const responseWithoutPath: Omit<FetchResponse, "authored_diff_path"> = {
         repository,
+        github_username: githubUsername,
         pull_request: pull,
         // The old project-specific backend enriched this with Linear. This global extension is GitHub-only.
         linear_issues: [],
@@ -200,6 +206,7 @@ export default function addressReviewCommentsExtension(pi: ExtensionAPI): void {
       activeWorkflow = {
         repoRoot: repositoryRoot,
         repository,
+        githubUsername,
         artifactDirectory: artifactPaths.directory,
         commandRequestPath: artifactPaths.commandRequestPath,
         fetchRequestPath: artifactPaths.fetchRequestPath,
@@ -277,7 +284,25 @@ export default function addressReviewCommentsExtension(pi: ExtensionAPI): void {
           entry.type === "custom" && entry.customType === STATE_ENTRY_TYPE,
       )
       .pop() as { data?: WorkflowState } | undefined;
+    githubUsernameCache.reset(lastState?.data?.githubUsername);
     activeWorkflow = lastState?.data?.active ? lastState.data : undefined;
+    if (activeWorkflow && !activeWorkflow.githubUsername) {
+      try {
+        const client = new GitHubClient(commandExecutor(pi), activeWorkflow.repoRoot);
+        const githubUsername = await githubUsernameCache.get(client);
+        activeWorkflow = { ...activeWorkflow, githubUsername };
+        pi.appendEntry(STATE_ENTRY_TYPE, activeWorkflow);
+      } catch (error) {
+        ctx.ui.notify(
+          `Unable to restore the review workflow's GitHub supervisor: ${
+            error instanceof Error ? error.message : String(error)
+          }. Run /reload to retry.`,
+          "error",
+        );
+        updateStatus(ctx);
+        return;
+      }
+    }
     terminalThreadIds = new Set(
       entries
         .filter(

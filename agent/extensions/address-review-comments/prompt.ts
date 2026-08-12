@@ -40,6 +40,7 @@ export function makeAgentPrompt(state: WorkflowState, summary: string): string {
 You are addressing PR review comments in manual interactive mode. The extension has already fetched the review context with the GitHub CLI.
 
 Repository root: \`${state.repoRoot}\`
+GitHub supervisor: @${state.githubUsername}
 Workflow artifact directory: \`${state.artifactDirectory}\`
 Fetch request JSON: \`${state.fetchRequestPath}\`
 Fetch response JSON: \`${state.fetchResponsePath}\`
@@ -62,7 +63,8 @@ ${summary}
 - After \`skip\`, revert every code change made for that thread, post nothing, track it as skipped, and continue.
 - After \`abort\`, stop processing and summarize the current state.
 - Leave your changes unstaged. Never commit. The user may commit while you work, so HEAD may advance.
-- Never add AI attribution or co-authorship.
+- Draft only the substantive reply. Do not add attribution yourself; the checkpoint tool appends the standardized supervised-agent footer to every posted reply.
+- Never add any other AI attribution or co-authorship.
 
 ## Reply templates
 

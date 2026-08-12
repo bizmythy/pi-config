@@ -9,10 +9,16 @@ import {
   writeFetchArtifacts,
   writeReplyRequest,
 } from "../../extensions/address-review-comments/artifacts.js";
-import { CHECKPOINT_TOOL_NAME } from "../../extensions/address-review-comments/constants.js";
+import { createReplyRequest } from "../../extensions/address-review-comments/attribution.js";
+import {
+  CHECKPOINT_TOOL_NAME,
+  REVIEW_COMMAND_NAME,
+  REVIEW_COMMAND_USAGE,
+} from "../../extensions/address-review-comments/constants.js";
 import {
   fetchGitHubReviewData,
   GitHubClient,
+  GitHubUsernameCache,
   ReviewThreadResolveError,
 } from "../../extensions/address-review-comments/github.js";
 import { createLazyToolActivation } from "../../extensions/address-review-comments/tool-activation.js";
@@ -57,6 +63,36 @@ test("does not register or activate the checkpoint tool at default startup", () 
 
   activation.setEnabled(false);
   assert.deepEqual(active, ["read", "bash"]);
+});
+
+test("appends the supervised-agent attribution to both reply actions", () => {
+  const expectedComment = `Fixed.\n\n> \`pi\` agent using \`${REVIEW_COMMAND_NAME}\`, supervised by @supervisor-login`;
+
+  assert.deepEqual(createReplyRequest("thread-1", "Fixed.", false, "supervisor-login"), {
+    thread_id: "thread-1",
+    comment: expectedComment,
+    resolve: false,
+  });
+  assert.deepEqual(createReplyRequest("thread-1", "Fixed.", true, "supervisor-login"), {
+    thread_id: "thread-1",
+    comment: expectedComment,
+    resolve: true,
+  });
+});
+
+test("fetches the authenticated GitHub username only once per session cache", async () => {
+  let calls = 0;
+  const exec: CommandExecutor = async (_command, args) => {
+    assert.deepEqual(args, ["api", "user", "--jq", ".login"]);
+    calls += 1;
+    return success("supervisor-login\n");
+  };
+  const client = new GitHubClient(exec, "/repo");
+  const cache = new GitHubUsernameCache();
+
+  assert.deepEqual(await Promise.all([cache.get(client), cache.get(client)]), ["supervisor-login", "supervisor-login"]);
+  assert.equal(await cache.get(client), "supervisor-login");
+  assert.equal(calls, 1);
 });
 
 function deferred<T>() {
@@ -274,6 +310,7 @@ test("keeps workflow requests and fetch artifacts in one temporary directory", a
       "diff --git a/file.ts b/file.ts\n",
       {
         repository: "owner/repo",
+        github_username: "supervisor-login",
         pull_request: {
           number: 42,
           title: "Review me",
@@ -303,6 +340,8 @@ test("keeps workflow requests and fetch artifacts in one temporary directory", a
       assert.equal(path.dirname(artifactPath), paths.directory);
     }
     assert.equal(response.authored_diff_path, paths.diffPath);
+    assert.equal(response.github_username, "supervisor-login");
+    assert.equal(JSON.parse(await readFile(paths.fetchResponsePath, "utf8")).github_username, "supervisor-login");
     assert.deepEqual(JSON.parse(await readFile(replyRequestPath, "utf8")), {
       thread_id: "PRRT/thread=1",
       comment: "Fixed.",
@@ -328,7 +367,7 @@ test("validates review command arguments", () => {
   assert.deepEqual(parseAddressReviewArgs("4098"), { ok: true, prNumber: 4098 });
   assert.deepEqual(parseAddressReviewArgs("--auto 4098"), {
     ok: false,
-    message: "Automatic mode is not supported. Use /address-review-comments [PR_NUMBER].",
+    message: `Unsupported option. Use ${REVIEW_COMMAND_USAGE}.`,
   });
   assert.deepEqual(parseAddressReviewArgs("abc"), { ok: false, message: "PR number must be a positive integer." });
 });
