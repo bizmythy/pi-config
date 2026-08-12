@@ -19,7 +19,44 @@
     "root": {
       "inputs": {
         "nixpkgs": "nixpkgs",
+        "topiary-nushell": "topiary-nushell",
         "treefmt-nix": "treefmt-nix"
+      }
+    },
+    "systems": {
+      "locked": {
+        "lastModified": 1681028828,
+        "narHash": "sha256-Vy1rq5AaRuLzOxct8nz4T6wlgyUR7zLU309k9mBC768=",
+        "owner": "nix-systems",
+        "repo": "default",
+        "rev": "da67096a3b9bf56a91d16901293e51ba5b49a27e",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nix-systems",
+        "repo": "default",
+        "type": "github"
+      }
+    },
+    "topiary-nushell": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ],
+        "systems": "systems"
+      },
+      "locked": {
+        "lastModified": 1786562018,
+        "narHash": "sha256-G5JE71DDfwp6nVYC8P8R2SXumVBIeHF9KbECQ1TGSnY=",
+        "owner": "bizmythy",
+        "repo": "topiary-nushell-nix",
+        "rev": "ebe8ccad72625d94969e4cc76875ed66ee64e2fe",
+        "type": "github"
+      },
+      "original": {
+        "owner": "bizmythy",
+        "repo": "topiary-nushell-nix",
+        "type": "github"
       }
     },
     "treefmt-nix": {

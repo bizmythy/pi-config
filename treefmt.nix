@@ -22,6 +22,7 @@
       enable = true;
       lineLength = 120;
     };
+    topiary-nushell.enable = true;
     stylua = {
       enable = true;
       settings = {

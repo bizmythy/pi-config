@@ -31,7 +31,7 @@ def linear-authenticated [] {
   $result.exit_code == 0
 }
 
-def json-key-paths [value: any, prefix: string = ""] {
+def json-key-paths [value: any prefix: string = ""] {
   if not (($value | describe) | str starts-with "record") {
     return []
   }
@@ -39,24 +39,26 @@ def json-key-paths [value: any, prefix: string = ""] {
   $value
   | columns
   | each {|key|
-      let path = if ($prefix | is-empty) { $key } else { $"($prefix).($key)" }
-      [$path ...(json-key-paths ($value | get $key) $path)]
-    }
+    let path = if ($prefix | is-empty) { $key } else { $"($prefix).($key)" }
+    [$path ...(json-key-paths ($value | get $key) $path)]
+  }
   | flatten
   | sort
 }
 
-def secret-keys-match [template_file: string, secret_file: string] {
+def secret-keys-match [template_file: string secret_file: string] {
   if not ($secret_file | path exists) {
     return false
   }
 
   let expected_keys = (json-key-paths (open --raw $template_file | from json))
-  let existing_keys = (try {
-    json-key-paths (open --raw $secret_file | from json)
-  } catch {
-    []
-  })
+  let existing_keys = (
+    try {
+      json-key-paths (open --raw $secret_file | from json)
+    } catch {
+      []
+    }
+  )
 
   $existing_keys == $expected_keys
 }
@@ -99,7 +101,7 @@ def setup-auth-profiles [agent_dir: string] {
   }
 }
 
-def apply-agent-npm-patches [bun_dir: string, agent_dir: string] {
+def apply-agent-npm-patches [bun_dir: string agent_dir: string] {
   let patch_package = ($bun_dir | path join "node_modules" ".bin" "patch-package")
   let patch_dir = ($agent_dir | path join "patches")
   let patch_dir_relative = "../patches"
@@ -177,10 +179,10 @@ def ensure-agent-npm-packages [agent_dir: string] {
 }
 
 def main [
-  --pull(-p)             # Pull this repo before installing.
-  --skip-pi-update       # Skip `pi update --extensions`.
-  --skip-pi-list         # Skip final `pi list` verification.
-  --force-inject         # Regenerate secret files even when their keys match.
+  --pull (-p) # Pull this repo before installing.
+  --skip-pi-update # Skip `pi update --extensions`.
+  --skip-pi-list # Skip final `pi list` verification.
+  --force-inject # Regenerate secret files even when their keys match.
 ] {
   let repo = (repo-root)
   cd $repo
@@ -212,7 +214,7 @@ def main [
   let personal_template = ($secrets_dir | path join "personal.json.tpl")
   let work_template = ($secrets_dir | path join "work.json.tpl")
 
-  let required_commands = ["bun", "pi", "linear", "nvim"]
+  let required_commands = ["bun" "pi" "linear" "nvim"]
   for cmd in $required_commands {
     if not (command-exists $cmd) {
       error make {msg: $"Missing required command `($cmd)`. Install it, ensure it is on PATH, and rerun this script."}
@@ -292,11 +294,11 @@ def main [
   ^bun install --cwd $agent_dir --frozen-lockfile
 
   let required_local_packages = [
-    ($agent_dir | path join "node_modules" "@msgpack" "msgpack"),
-    ($agent_dir | path join "node_modules" "qrcode"),
-    ($agent_dir | path join "node_modules" "remark-parse"),
-    ($agent_dir | path join "node_modules" "unified"),
-    ($agent_dir | path join "node_modules" "ws"),
+    ($agent_dir | path join "node_modules" "@msgpack" "msgpack")
+    ($agent_dir | path join "node_modules" "qrcode")
+    ($agent_dir | path join "node_modules" "remark-parse")
+    ($agent_dir | path join "node_modules" "unified")
+    ($agent_dir | path join "node_modules" "ws")
   ]
 
   for pkg in $required_local_packages {

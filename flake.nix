@@ -1,6 +1,10 @@
 {
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    topiary-nushell = {
+      url = "github:bizmythy/topiary-nushell-nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
     treefmt-nix = {
       url = "github:numtide/treefmt-nix";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -11,6 +15,7 @@
     {
       self,
       nixpkgs,
+      topiary-nushell,
       treefmt-nix,
     }:
     let
@@ -22,7 +27,14 @@
       ];
       forAllSystems = nixpkgs.lib.genAttrs systems;
       pkgsFor = system: import nixpkgs { inherit system; };
-      treefmtFor = system: treefmt-nix.lib.evalModule (pkgsFor system) ./treefmt.nix;
+      treefmtFor =
+        system:
+        treefmt-nix.lib.evalModule (pkgsFor system) {
+          imports = [
+            topiary-nushell.treefmtModules.default
+            ./treefmt.nix
+          ];
+        };
     in
     {
       devShells = forAllSystems (
