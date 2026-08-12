@@ -19,6 +19,7 @@ import {
 import { checkoutExplicitPull, currentBranch, resolveRepositoryRoot, shortHead } from "./git.js";
 import { fetchGitHubReviewData, GitHubClient } from "./github.js";
 import { makeAgentPrompt, summarizeFetch } from "./prompt.js";
+import { createLazyToolActivation } from "./tool-activation.js";
 import type { FetchResponse, WorkflowState } from "./types.js";
 
 const LEGACY_BLOCK_REASON = `The legacy ${REVIEW_COMMAND_NAME} skill is disabled. Use ${REVIEW_COMMAND} so the extension can enforce checkpoints.`;
@@ -91,14 +92,7 @@ function targetsLegacySkill(toolName: string, input: unknown, cwd: string): bool
 export default function addressReviewCommentsExtension(pi: ExtensionAPI): void {
   let activeWorkflow: WorkflowState | undefined;
   let terminalThreadIds = new Set<string>();
-
-  const setToolEnabled = (enabled: boolean) => {
-    const active = pi.getActiveTools();
-    if (enabled && !active.includes(CHECKPOINT_TOOL_NAME)) pi.setActiveTools([...active, CHECKPOINT_TOOL_NAME]);
-    if (!enabled && active.includes(CHECKPOINT_TOOL_NAME)) {
-      pi.setActiveTools(active.filter((name) => name !== CHECKPOINT_TOOL_NAME));
-    }
-  };
+  let setToolEnabled!: (enabled: boolean) => void;
 
   const updateStatus = (ctx: ExtensionContext) => {
     if (!activeWorkflow) {
@@ -130,13 +124,15 @@ export default function addressReviewCommentsExtension(pi: ExtensionAPI): void {
     return complete;
   };
 
-  registerCheckpointTool(pi, {
-    getWorkflow: () => activeWorkflow,
-    isTerminal: (threadId) => terminalThreadIds.has(threadId),
-    finish,
-    markTerminal,
+  const checkpointTool = createLazyToolActivation(pi, CHECKPOINT_TOOL_NAME, () => {
+    registerCheckpointTool(pi, {
+      getWorkflow: () => activeWorkflow,
+      isTerminal: (threadId) => terminalThreadIds.has(threadId),
+      finish,
+      markTerminal,
+    });
   });
-  setToolEnabled(false);
+  setToolEnabled = checkpointTool.setEnabled;
 
   const runReviewCommand = async (args: string, ctx: ExtensionCommandContext) => {
     if (!ctx.isIdle()) {
