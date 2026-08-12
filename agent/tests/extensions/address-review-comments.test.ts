@@ -15,6 +15,7 @@ import {
   REVIEW_COMMAND_NAME,
   REVIEW_COMMAND_USAGE,
 } from "../../extensions/address-review-comments/constants.js";
+import { queueCheckpointFeedback } from "../../extensions/address-review-comments/feedback-message.js";
 import {
   fetchGitHubReviewData,
   GitHubClient,
@@ -63,6 +64,18 @@ test("does not register or activate the checkpoint tool at default startup", () 
 
   activation.setEnabled(false);
   assert.deepEqual(active, ["read", "bash"]);
+});
+
+test("queues checkpoint feedback as a normal steer-delivered user message", () => {
+  const messages: Array<{ content: string; options: { deliverAs: "steer" } }> = [];
+  const sender = {
+    sendUserMessage: (content: string, options: { deliverAs: "steer" }) => messages.push({ content, options }),
+  };
+
+  assert.equal(queueCheckpointFeedback(sender, "  Please keep the existing API.\n"), "Please keep the existing API.");
+  assert.deepEqual(messages, [{ content: "Please keep the existing API.", options: { deliverAs: "steer" } }]);
+  assert.equal(queueCheckpointFeedback(sender, "  \n"), undefined);
+  assert.equal(messages.length, 1);
 });
 
 test("appends the supervised-agent attribution to both reply actions", () => {

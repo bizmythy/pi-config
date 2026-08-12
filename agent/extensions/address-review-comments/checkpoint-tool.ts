@@ -7,6 +7,7 @@ import { writeReplyRequest } from "./artifacts.js";
 import { appendReplyAttribution, createReplyRequest } from "./attribution.js";
 import { checkpointAction, ReviewCheckpointDialog } from "./checkpoint-dialog.js";
 import { CHECKPOINT_ENTRY_TYPE, CHECKPOINT_TOOL_NAME, REVIEW_COMMAND } from "./constants.js";
+import { queueCheckpointFeedback } from "./feedback-message.js";
 import { GitHubClient, ReviewThreadResolveError } from "./github.js";
 import type { CheckpointOption, CheckpointParams, RecommendedAction, ReplyResponse, WorkflowState } from "./types.js";
 
@@ -95,12 +96,14 @@ export function registerCheckpointTool(pi: ExtensionAPI, controller: CheckpointC
 
       const action = checkpointAction(selectedOption);
       if (action.kind === "revise") {
-        const userText = (await ctx.ui.editor(action.prompt, "")) ?? "";
+        const userText = queueCheckpointFeedback(pi, (await ctx.ui.editor(action.prompt, "")) ?? "");
         return {
           content: [
             {
               type: "text",
-              text: `User selected ${selectedOption}. User input:\n\n${userText}\n\nIncorporate it, then call ${CHECKPOINT_TOOL_NAME} again for this thread.`,
+              text: userText
+                ? `User feedback follows in the next message. Incorporate it, then call ${CHECKPOINT_TOOL_NAME} again for this thread.`
+                : `No feedback provided. Call ${CHECKPOINT_TOOL_NAME} again for this thread.`,
             },
           ],
           details: { selectedOption, threadId: checkpoint.threadId, userText },
