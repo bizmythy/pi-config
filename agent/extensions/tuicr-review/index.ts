@@ -1,10 +1,10 @@
 import { readFile } from "node:fs/promises";
-import { homedir } from "node:os";
-import path from "node:path";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Key, matchesKey, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { latestCustomEntryData } from "../shared/session-entries.js";
 import { commentLabel } from "./labels.js";
 import { parseTuicrReview, type TuicrComment, type TuicrReview } from "./parser.js";
+import { resolveReviewPath } from "./path.js";
 
 const STATE_ENTRY_TYPE = "tuicr-review-state";
 const STATUS_ID = "tuicr-review";
@@ -14,17 +14,6 @@ interface ReviewState {
   review: TuicrReview;
   addressedIds: string[];
   source: string;
-}
-
-function resolveReviewPath(argument: string, cwd: string): string {
-  let value = argument.trim();
-  if (value.startsWith("@")) value = value.slice(1);
-  if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
-    value = value.slice(1, -1);
-  }
-  if (value === "~") value = homedir();
-  else if (value.startsWith("~/")) value = path.join(homedir(), value.slice(2));
-  return path.resolve(cwd, value);
 }
 
 async function selectComments(
@@ -270,14 +259,7 @@ export default function tuicrReviewExtension(pi: ExtensionAPI) {
   });
 
   pi.on("session_start", async (_event, ctx) => {
-    const entry = ctx.sessionManager
-      .getBranch()
-      .filter(
-        (candidate: { type: string; customType?: string }) =>
-          candidate.type === "custom" && candidate.customType === STATE_ENTRY_TYPE,
-      )
-      .pop() as { data?: ReviewState } | undefined;
-    state = entry?.data;
+    state = latestCustomEntryData<ReviewState>(ctx.sessionManager.getBranch(), STATE_ENTRY_TYPE);
     updateStatus(ctx);
   });
 

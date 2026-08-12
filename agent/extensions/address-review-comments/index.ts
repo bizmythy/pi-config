@@ -1,6 +1,8 @@
-import path from "node:path";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
+import { resolveExtensionPath } from "../shared/paths.js";
+import { latestCustomEntryData } from "../shared/session-entries.js";
+import { createLazyToolActivation } from "../shared/tool-activation.js";
 import { parseAddressReviewArgs } from "./args.js";
 import { createReviewArtifactDirectory, writeFetchArtifacts } from "./artifacts.js";
 import { registerCheckpointTool } from "./checkpoint-tool.js";
@@ -19,7 +21,6 @@ import {
 import { checkoutExplicitPull, currentBranch, resolveRepositoryRoot, shortHead } from "./git.js";
 import { fetchGitHubReviewData, GitHubClient, GitHubUsernameCache } from "./github.js";
 import { makeAgentPrompt, summarizeFetch } from "./prompt.js";
-import { createLazyToolActivation } from "./tool-activation.js";
 import type { FetchResponse, WorkflowState } from "./types.js";
 
 const LEGACY_BLOCK_REASON = `The legacy ${REVIEW_COMMAND_NAME} skill is disabled. Use ${REVIEW_COMMAND} so the extension can enforce checkpoints.`;
@@ -77,10 +78,10 @@ class FetchProgress {
 
 function targetsLegacySkill(toolName: string, input: unknown, cwd: string): boolean {
   const params = input as { path?: unknown; command?: unknown };
-  const absoluteSkillPath = path.resolve(cwd, LEGACY_SKILL_PATH);
+  const absoluteSkillPath = resolveExtensionPath(LEGACY_SKILL_PATH, cwd);
   if (toolName === "read") {
-    const requested = typeof params.path === "string" ? params.path.replace(/^@/, "") : "";
-    return path.resolve(cwd, requested) === absoluteSkillPath;
+    const requested = typeof params.path === "string" ? params.path : "";
+    return resolveExtensionPath(requested, cwd) === absoluteSkillPath;
   }
   if (toolName === "bash") {
     const command = String(params.command ?? "");
@@ -278,14 +279,9 @@ export default function addressReviewCommentsExtension(pi: ExtensionAPI): void {
 
   pi.on("session_start", async (_event, ctx) => {
     const entries = ctx.sessionManager.getBranch();
-    const lastState = entries
-      .filter(
-        (entry: { type: string; customType?: string }) =>
-          entry.type === "custom" && entry.customType === STATE_ENTRY_TYPE,
-      )
-      .pop() as { data?: WorkflowState } | undefined;
-    githubUsernameCache.reset(lastState?.data?.githubUsername);
-    activeWorkflow = lastState?.data?.active ? lastState.data : undefined;
+    const lastState = latestCustomEntryData<WorkflowState>(entries, STATE_ENTRY_TYPE);
+    githubUsernameCache.reset(lastState?.githubUsername);
+    activeWorkflow = lastState?.active ? lastState : undefined;
     if (activeWorkflow && !activeWorkflow.githubUsername) {
       try {
         const client = new GitHubClient(commandExecutor(pi), activeWorkflow.repoRoot);

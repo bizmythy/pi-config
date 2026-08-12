@@ -10,11 +10,7 @@ import {
   writeReplyRequest,
 } from "../../extensions/address-review-comments/artifacts.js";
 import { createReplyRequest } from "../../extensions/address-review-comments/attribution.js";
-import {
-  CHECKPOINT_TOOL_NAME,
-  REVIEW_COMMAND_NAME,
-  REVIEW_COMMAND_USAGE,
-} from "../../extensions/address-review-comments/constants.js";
+import { REVIEW_COMMAND_NAME, REVIEW_COMMAND_USAGE } from "../../extensions/address-review-comments/constants.js";
 import { queueCheckpointFeedback } from "../../extensions/address-review-comments/feedback-message.js";
 import {
   fetchGitHubReviewData,
@@ -22,49 +18,11 @@ import {
   GitHubUsernameCache,
   ReviewThreadResolveError,
 } from "../../extensions/address-review-comments/github.js";
-import { createLazyToolActivation } from "../../extensions/address-review-comments/tool-activation.js";
 import type { CommandExecutor, ExecResult } from "../../extensions/address-review-comments/types.js";
 
 function success(stdout: string): ExecResult {
   return { code: 0, stdout, stderr: "" };
 }
-
-test("does not register or activate the checkpoint tool at default startup", () => {
-  let registrations = 0;
-  let activeReads = 0;
-  const activeWrites: string[][] = [];
-  let active = ["read", "bash"];
-  const activation = createLazyToolActivation(
-    {
-      getActiveTools: () => {
-        activeReads += 1;
-        return active;
-      },
-      setActiveTools: (names) => {
-        active = names;
-        activeWrites.push(names);
-      },
-    },
-    CHECKPOINT_TOOL_NAME,
-    () => {
-      registrations += 1;
-    },
-  );
-
-  activation.setEnabled(false);
-  assert.equal(activation.isRegistered(), false);
-  assert.equal(registrations, 0);
-  assert.equal(activeReads, 0);
-  assert.deepEqual(activeWrites, []);
-
-  activation.setEnabled(true);
-  activation.setEnabled(true);
-  assert.equal(registrations, 1);
-  assert.equal(active.filter((name) => name === CHECKPOINT_TOOL_NAME).length, 1);
-
-  activation.setEnabled(false);
-  assert.deepEqual(active, ["read", "bash"]);
-});
 
 test("queues checkpoint feedback as a normal steer-delivered user message", () => {
   const messages: Array<{ content: string; options: { deliverAs: "steer" } }> = [];

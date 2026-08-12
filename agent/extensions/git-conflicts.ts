@@ -1,24 +1,21 @@
-import { execFile } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { promisify } from "node:util";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-
-const execFileAsync = promisify(execFile);
+import type { ExecResult, ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const MAX_OUTPUT = 12_000;
+const GIT_TIMEOUT_MS = 20_000;
 
-async function git(cwd: string, args: string[]): Promise<string> {
-  const { stdout } = await execFileAsync("git", args, {
-    cwd,
-    maxBuffer: 1024 * 1024 * 10,
-  });
-  return String(stdout).trimEnd();
+export type GitExecutor = (args: string[]) => Promise<ExecResult>;
+type PiExecutor = ExtensionAPI["exec"];
+
+export function createGitExecutor(exec: PiExecutor, cwd: string): GitExecutor {
+  return (args) => exec("git", args, { cwd, timeout: GIT_TIMEOUT_MS });
 }
 
-async function tryGit(cwd: string, args: string[]): Promise<string | null> {
+async function tryGit(exec: GitExecutor, args: string[]): Promise<string | null> {
   try {
-    return await git(cwd, args);
+    const result = await exec(args);
+    return result.code === 0 ? result.stdout.trimEnd() : null;
   } catch {
     return null;
   }
@@ -46,7 +43,7 @@ type Operation = {
   details: string[];
 };
 
-async function detectOperation(cwd: string, gitDir: string): Promise<Operation> {
+async function detectOperation(exec: GitExecutor, gitDir: string): Promise<Operation> {
   const details: string[] = [];
 
   if (existsSync(join(gitDir, "rebase-merge")) || existsSync(join(gitDir, "rebase-apply"))) {
@@ -75,7 +72,7 @@ async function detectOperation(cwd: string, gitDir: string): Promise<Operation> 
 
   const cherryPickHead = readGitFile(gitDir, "CHERRY_PICK_HEAD");
   if (cherryPickHead) {
-    const commit = await tryGit(cwd, ["show", "--stat", "--format=fuller", "--no-renames", cherryPickHead]);
+    const commit = await tryGit(exec, ["show", "--stat", "--format=fuller", "--no-renames", cherryPickHead]);
     details.push(`cherry-pick commit: ${cherryPickHead}`);
     if (commit) details.push(`cherry-pick commit details:\n${truncate(commit, 10_000)}`);
     return {
@@ -88,7 +85,7 @@ async function detectOperation(cwd: string, gitDir: string): Promise<Operation> 
 
   const revertHead = readGitFile(gitDir, "REVERT_HEAD");
   if (revertHead) {
-    const commit = await tryGit(cwd, ["show", "--stat", "--format=fuller", "--no-renames", revertHead]);
+    const commit = await tryGit(exec, ["show", "--stat", "--format=fuller", "--no-renames", revertHead]);
     details.push(`revert commit: ${revertHead}`);
     if (commit) details.push(`revert commit details:\n${truncate(commit, 10_000)}`);
     return {
@@ -101,7 +98,13 @@ async function detectOperation(cwd: string, gitDir: string): Promise<Operation> 
 
   const mergeHead = readGitFile(gitDir, "MERGE_HEAD");
   if (mergeHead) {
-    const commits = await tryGit(cwd, ["show", "--stat", "--format=fuller", "--no-renames", ...mergeHead.split(/\s+/)]);
+    const commits = await tryGit(exec, [
+      "show",
+      "--stat",
+      "--format=fuller",
+      "--no-renames",
+      ...mergeHead.split(/\s+/),
+    ]);
     details.push(`merge head(s): ${mergeHead}`);
     const mergeMsg = readGitFile(gitDir, "MERGE_MSG");
     if (mergeMsg) details.push(`merge message:\n${mergeMsg}`);
@@ -145,40 +148,40 @@ async function detectOperation(cwd: string, gitDir: string): Promise<Operation> 
   };
 }
 
-async function buildPrompt(cwd: string, userRequest?: string): Promise<string> {
-  const gitDir = await tryGit(cwd, ["rev-parse", "--absolute-git-dir"]);
+export async function buildPrompt(exec: GitExecutor, cwd: string, userRequest?: string): Promise<string> {
+  const gitDir = await tryGit(exec, ["rev-parse", "--absolute-git-dir"]);
   if (!gitDir) {
     throw new Error("/git-conflicts must be run from inside a git repository (no .git directory found).");
   }
 
   const [repoRoot, branch, upstream, status, conflictedFiles, unmergedEntries, remotes] = await Promise.all([
-    tryGit(cwd, ["rev-parse", "--show-toplevel"]),
-    tryGit(cwd, ["branch", "--show-current"]),
-    tryGit(cwd, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"]),
-    tryGit(cwd, ["status", "--short", "--branch", "--untracked-files=all"]),
-    tryGit(cwd, ["diff", "--name-only", "--diff-filter=U"]),
-    tryGit(cwd, ["ls-files", "-u"]),
-    tryGit(cwd, ["remote", "-v"]),
+    tryGit(exec, ["rev-parse", "--show-toplevel"]),
+    tryGit(exec, ["branch", "--show-current"]),
+    tryGit(exec, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"]),
+    tryGit(exec, ["status", "--short", "--branch", "--untracked-files=all"]),
+    tryGit(exec, ["diff", "--name-only", "--diff-filter=U"]),
+    tryGit(exec, ["ls-files", "-u"]),
+    tryGit(exec, ["remote", "-v"]),
   ]);
 
-  const mainRef = (await tryGit(cwd, ["rev-parse", "--verify", "main"]))
+  const mainRef = (await tryGit(exec, ["rev-parse", "--verify", "main"]))
     ? "main"
-    : (await tryGit(cwd, ["rev-parse", "--verify", "origin/main"]))
+    : (await tryGit(exec, ["rev-parse", "--verify", "origin/main"]))
       ? "origin/main"
-      : (await tryGit(cwd, ["rev-parse", "--verify", "master"]))
+      : (await tryGit(exec, ["rev-parse", "--verify", "master"]))
         ? "master"
-        : (await tryGit(cwd, ["rev-parse", "--verify", "origin/master"]))
+        : (await tryGit(exec, ["rev-parse", "--verify", "origin/master"]))
           ? "origin/master"
           : null;
 
   const [recentBranchLog, recentMainLog, mergeBase, diffStatMain] = await Promise.all([
-    tryGit(cwd, ["log", "--oneline", "--decorate", "-12", "HEAD", "--"]),
-    mainRef ? tryGit(cwd, ["log", "--oneline", "--decorate", "-12", mainRef, "--"]) : Promise.resolve(null),
-    mainRef ? tryGit(cwd, ["merge-base", "HEAD", mainRef]) : Promise.resolve(null),
-    mainRef ? tryGit(cwd, ["diff", "--stat", `${mainRef}...HEAD`]) : Promise.resolve(null),
+    tryGit(exec, ["log", "--oneline", "--decorate", "-12", "HEAD", "--"]),
+    mainRef ? tryGit(exec, ["log", "--oneline", "--decorate", "-12", mainRef, "--"]) : Promise.resolve(null),
+    mainRef ? tryGit(exec, ["merge-base", "HEAD", mainRef]) : Promise.resolve(null),
+    mainRef ? tryGit(exec, ["diff", "--stat", `${mainRef}...HEAD`]) : Promise.resolve(null),
   ]);
 
-  const operation = await detectOperation(cwd, gitDir);
+  const operation = await detectOperation(exec, gitDir);
   const userRequestSection = userRequest?.trim() ? `\n\nUser-provided request:\n${userRequest.trim()}` : "";
 
   return `View the git context for the current repository branch and main, then resolve all conflicts and proceed with the current operation until fully complete and all conflicts are resolved.
@@ -243,7 +246,7 @@ export default function (pi: ExtensionAPI) {
       }
 
       try {
-        const prompt = await buildPrompt(ctx.cwd, args);
+        const prompt = await buildPrompt(createGitExecutor(pi.exec.bind(pi), ctx.cwd), ctx.cwd, args);
         ctx.ui.notify("Starting git conflict resolution workflow", "info");
         pi.sendUserMessage(prompt);
       } catch (error) {

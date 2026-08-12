@@ -11,6 +11,7 @@
 import * as os from "node:os";
 import * as path from "node:path";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import { updateActiveTools } from "./shared/tool-activation.js";
 
 const ATTACHED_KEY = "__piSubagentsToggleAttached";
 const PACKAGE_ROOT = path.join(os.homedir(), ".pi", "agent", "npm", "node_modules", "pi-subagents");
@@ -41,13 +42,7 @@ async function reloadWithState(ctx: ExtensionCommandContext, attached: boolean):
 }
 
 function applySubagentToolState(pi: ExtensionAPI): void {
-  const activeTools = new Set(pi.getActiveTools());
-  if (isAttached()) {
-    activeTools.add("subagent");
-  } else {
-    activeTools.delete("subagent");
-  }
-  pi.setActiveTools(Array.from(activeTools));
+  updateActiveTools(pi, isAttached() ? { add: ["subagent"] } : { remove: ["subagent"] });
 }
 
 export default async function subagentsToggle(pi: ExtensionAPI): Promise<void> {

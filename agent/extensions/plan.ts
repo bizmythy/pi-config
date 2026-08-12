@@ -3,6 +3,10 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { type ExtensionAPI, type ExtensionContext, getMarkdownTheme } from "@earendil-works/pi-coding-agent";
 import { Markdown } from "@earendil-works/pi-tui";
+import { isPlanTargetPath } from "./plan-support/paths.js";
+import { resolveExtensionPath } from "./shared/paths.js";
+import { latestCustomEntryData } from "./shared/session-entries.js";
+import { createLazyToolActivation } from "./shared/tool-activation.js";
 
 const PLANS_ROOT = path.join(homedir(), "pCloudDrive", "pi-agent", "plans");
 const MAX_PLAN_CHOICES = 20;
@@ -103,24 +107,6 @@ function timestamp(): string {
   const d = new Date();
   const pad = (n: number, width = 2) => String(n).padStart(width, "0");
   return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}-${pad(d.getMilliseconds(), 3)}`;
-}
-
-function expandHome(filePath: string): string {
-  if (filePath === "~") return homedir();
-  if (filePath.startsWith("~/")) return path.join(homedir(), filePath.slice(2));
-  return filePath;
-}
-
-function normalizeForCompare(filePath: string, cwd: string): string {
-  return path.resolve(cwd, expandHome(filePath));
-}
-
-function isPathDirectlyInDir(filePath: string, dir: string): boolean {
-  return path.dirname(filePath) === dir;
-}
-
-function isPlanFilename(filePath: string): boolean {
-  return path.basename(filePath).endsWith("-plan.md");
 }
 
 async function ensurePlansRootExists(): Promise<void> {
@@ -239,27 +225,7 @@ export default function planExtension(pi: ExtensionAPI) {
     ctx.ui.setStatus("plan", ctx.ui.theme.fg("warning", "plan"));
   }
 
-  let finishPlanToolRegistered = false;
-
-  function enableFinishPlanTool() {
-    ensureFinishPlanToolRegistered();
-    const activeTools = pi.getActiveTools();
-    if (!activeTools.includes(FINISH_PLAN_TOOL_NAME)) {
-      pi.setActiveTools([...activeTools, FINISH_PLAN_TOOL_NAME]);
-    }
-  }
-
-  function disableFinishPlanTool() {
-    const activeTools = pi.getActiveTools();
-    if (activeTools.includes(FINISH_PLAN_TOOL_NAME)) {
-      pi.setActiveTools(activeTools.filter((toolName) => toolName !== FINISH_PLAN_TOOL_NAME));
-    }
-  }
-
-  function ensureFinishPlanToolRegistered() {
-    if (finishPlanToolRegistered) return;
-    finishPlanToolRegistered = true;
-
+  const finishPlanTool = createLazyToolActivation(pi, FINISH_PLAN_TOOL_NAME, () => {
     pi.registerTool({
       name: FINISH_PLAN_TOOL_NAME,
       label: "Finish Plan",
@@ -285,18 +251,16 @@ export default function planExtension(pi: ExtensionAPI) {
         }
 
         const planDir =
-          activePlan.dir ?? (activePlan.path ? path.dirname(normalizeForCompare(activePlan.path, ctx.cwd)) : undefined);
+          activePlan.dir ??
+          (activePlan.path ? path.dirname(resolveExtensionPath(activePlan.path, ctx.cwd)) : undefined);
         if (!planDir) {
           throw new Error("No active plan directory is registered.");
         }
 
         const requestedPath = String(params.path);
-        const actual = normalizeForCompare(requestedPath, ctx.cwd);
-        if (!isPathDirectlyInDir(actual, planDir)) {
-          throw new Error(`finish_plan path must be inside ${planDir}; got ${requestedPath}`);
-        }
-        if (!isPlanFilename(actual)) {
-          throw new Error(`finish_plan path must end with -plan.md; got ${requestedPath}`);
+        const actual = resolveExtensionPath(requestedPath, ctx.cwd);
+        if (!isPlanTargetPath(requestedPath, ctx.cwd, planDir)) {
+          throw new Error(`finish_plan path must be a *-plan.md file directly inside ${planDir}; got ${requestedPath}`);
         }
 
         try {
@@ -310,7 +274,7 @@ export default function planExtension(pi: ExtensionAPI) {
         activePlan = { ...activePlan, dir: planDir, path: actual };
         planningInProgress = false;
         clearPlanStatus(ctx);
-        disableFinishPlanTool();
+        finishPlanTool.setEnabled(false);
         persistPlanState();
 
         const reviewMarkdown = `# Plan ready for review\n\nFile: \`${activePlan.path}\`\n\n---\n\n${planMarkdown}`;
@@ -334,7 +298,7 @@ export default function planExtension(pi: ExtensionAPI) {
         return new Markdown(String(fallbackText), 0, 0, getMarkdownTheme());
       },
     });
-  }
+  });
 
   pi.registerCommand("plan", {
     description: "Create a file-backed plan in ~/pCloudDrive/pi-agent/plans/<timestamp>/",
@@ -358,7 +322,7 @@ export default function planExtension(pi: ExtensionAPI) {
 
       activePlan = { dir, description, createdAt };
       planningInProgress = true;
-      enableFinishPlanTool();
+      finishPlanTool.setEnabled(true);
       persistPlanState();
       setPlanStatus(ctx);
 
@@ -415,7 +379,7 @@ export default function planExtension(pi: ExtensionAPI) {
     handler: async (_args, ctx) => {
       planningInProgress = false;
       clearPlanStatus(ctx);
-      disableFinishPlanTool();
+      finishPlanTool.setEnabled(false);
       persistPlanState();
       ctx.ui.notify("Plan turn cancelled.", "info");
     },
@@ -446,13 +410,12 @@ export default function planExtension(pi: ExtensionAPI) {
 
   pi.on("tool_call", async (event, ctx) => {
     const planDir =
-      activePlan.dir ?? (activePlan.path ? path.dirname(normalizeForCompare(activePlan.path, ctx.cwd)) : undefined);
+      activePlan.dir ?? (activePlan.path ? path.dirname(resolveExtensionPath(activePlan.path, ctx.cwd)) : undefined);
     if (!planningInProgress || !planDir) return undefined;
 
     if (event.toolName === "write" || event.toolName === "edit") {
       const filePath = String(event.input.path ?? "");
-      const actual = normalizeForCompare(filePath, ctx.cwd);
-      if (!isPathDirectlyInDir(actual, planDir) || !isPlanFilename(actual)) {
+      if (!isPlanTargetPath(filePath, ctx.cwd, planDir)) {
         return {
           block: true,
           reason: `Plan mode can only write a *-plan.md file inside ${planDir}`,
@@ -464,22 +427,19 @@ export default function planExtension(pi: ExtensionAPI) {
   });
 
   pi.on("session_start", async (_event, ctx) => {
-    const lastState = ctx.sessionManager
-      .getEntries()
-      .filter(
-        (entry: { type: string; customType?: string }) =>
-          entry.type === "custom" && entry.customType === "plan-extension-state",
-      )
-      .pop() as { data?: { activePlan?: PlanState } } | undefined;
+    const lastState = latestCustomEntryData<{ activePlan?: PlanState }>(
+      ctx.sessionManager.getEntries(),
+      "plan-extension-state",
+    );
 
-    activePlan = lastState?.data?.activePlan ?? {};
+    activePlan = lastState?.activePlan ?? {};
     planningInProgress = false;
-    disableFinishPlanTool();
+    finishPlanTool.setEnabled(false);
     ctx.ui.setStatus("plan", undefined);
   });
 
   pi.on("session_shutdown", async (_event, ctx) => {
     if (planningInProgress) clearPlanStatus(ctx);
-    disableFinishPlanTool();
+    finishPlanTool.setEnabled(false);
   });
 }
