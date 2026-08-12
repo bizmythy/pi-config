@@ -1,7 +1,9 @@
+import path from "node:path";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { type ExtensionAPI, type ExtensionContext, getMarkdownTheme } from "@earendil-works/pi-coding-agent";
 import { Markdown, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
+import { writeReplyRequest } from "./artifacts.js";
 import { checkpointAction, ReviewCheckpointDialog } from "./checkpoint-dialog.js";
 import { CHECKPOINT_ENTRY_TYPE, CHECKPOINT_TOOL_NAME, REVIEW_COMMAND } from "./constants.js";
 import { GitHubClient, ReviewThreadResolveError } from "./github.js";
@@ -141,6 +143,11 @@ export function registerCheckpointTool(pi: ExtensionAPI, controller: CheckpointC
         ],
         details: { phase: "submitting", selectedOption, threadId: checkpoint.threadId },
       });
+      await writeReplyRequest(workflow.artifactDirectory || path.dirname(workflow.fetchResponsePath), {
+        thread_id: checkpoint.threadId,
+        comment: checkpoint.draftReply,
+        resolve: action.resolveThread,
+      });
       const client = new GitHubClient((command, args, options) => pi.exec(command, args, options), workflow.repoRoot);
       let response: ReplyResponse;
       try {
@@ -176,7 +183,11 @@ export function registerCheckpointTool(pi: ExtensionAPI, controller: CheckpointC
           content: [
             {
               type: "text",
-              text: `${error.message}\n\nDo not post the reply again. Flag the thread as replied-but-unresolved and ${
+              text: `${error.message}\n\nGitHub reply response:\n\n\`\`\`json\n${JSON.stringify(
+                { thread_id: checkpoint.threadId, reply: error.reply },
+                null,
+                2,
+              )}\n\`\`\`\n\nDo not post the reply again. Flag the thread as replied-but-unresolved and ${
                 complete ? "summarize the completed workflow." : "continue to the next review thread."
               }`,
             },
@@ -201,7 +212,11 @@ export function registerCheckpointTool(pi: ExtensionAPI, controller: CheckpointC
         content: [
           {
             type: "text",
-            text: `User selected ${selectedOption}. Reply submitted: ${response.reply.url}\n\n${
+            text: `User selected ${selectedOption}. GitHub response:\n\n\`\`\`json\n${JSON.stringify(
+              response,
+              null,
+              2,
+            )}\n\`\`\`\n\n${
               complete
                 ? "The workflow is complete. Summarize addressed, skipped, and flagged threads."
                 : "Continue to the next review thread."

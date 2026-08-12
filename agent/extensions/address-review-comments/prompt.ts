@@ -40,6 +40,8 @@ export function makeAgentPrompt(state: WorkflowState, summary: string): string {
 You are addressing PR review comments in manual interactive mode. The extension has already fetched the review context with the GitHub CLI.
 
 Repository root: \`${state.repoRoot}\`
+Workflow artifact directory: \`${state.artifactDirectory}\`
+Fetch request JSON: \`${state.fetchRequestPath}\`
 Fetch response JSON: \`${state.fetchResponsePath}\`
 Authored diff: \`${state.diffPath}\`
 Starting commit: \`${state.startCommitShort}\` (compare against this to track overall review changes)
@@ -54,7 +56,7 @@ ${summary}
 - Never fix unrelated review issues together. Comments about the same issue/fix may be grouped.
 - Never run GitHub review-thread mutations or legacy review-comment commands yourself.
 - For every reply decision, including outdated threads, call \`${CHECKPOINT_TOOL_NAME}\`. The tool owns human approval, posting, and resolution.
-- A reply is submitted only when \`${CHECKPOINT_TOOL_NAME}\` returns \`resolve\` or \`post\` with a structured GitHub response.
+- A reply is submitted only when \`${CHECKPOINT_TOOL_NAME}\` returns \`resolve\` or \`post\` with the structured GitHub response.
 - After \`edit\`, incorporate the user's instructions and recreate the checkpoint for the same thread.
 - After \`feedback\`, address the feedback in the code and/or draft, then recreate the checkpoint.
 - After \`skip\`, revert every code change made for that thread, post nothing, track it as skipped, and continue.

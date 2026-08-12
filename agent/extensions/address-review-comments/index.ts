@@ -2,7 +2,7 @@ import path from "node:path";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { parseAddressReviewArgs } from "./args.js";
-import { writeReviewArtifacts } from "./artifacts.js";
+import { createReviewArtifactDirectory, writeFetchArtifacts } from "./artifacts.js";
 import { registerCheckpointTool } from "./checkpoint-tool.js";
 import {
   CHECKPOINT_ENTRY_TYPE,
@@ -153,13 +153,21 @@ export default function addressReviewCommentsExtension(pi: ExtensionAPI): void {
       return;
     }
 
+    const startedAt = new Date().toISOString();
     const progress = new FetchProgress(ctx);
     try {
+      const artifactPaths = await createReviewArtifactDirectory({
+        arguments: args,
+        cwd: ctx.cwd,
+        requested_pull_number: parsed.prNumber ?? null,
+        started_at: startedAt,
+      });
       const exec = commandExecutor(pi);
       const repositoryRoot = await resolveRepositoryRoot(exec, ctx.cwd);
       const client = new GitHubClient(exec, repositoryRoot);
       const [repository, branch] = await Promise.all([client.detectRepository(), currentBranch(exec, repositoryRoot)]);
-      const pull = await client.getPullRequest(repository, parsed.prNumber ?? branch);
+      const selector = parsed.prNumber ?? branch;
+      const pull = await client.getPullRequest(repository, selector);
       progress.complete("metadata");
 
       if (parsed.prNumber !== undefined) {
@@ -180,7 +188,12 @@ export default function addressReviewCommentsExtension(pi: ExtensionAPI): void {
         linear_issues: [],
         review_threads: unresolved,
       };
-      const artifacts = await writeReviewArtifacts(githubData.diff, responseWithoutPath);
+      const response = await writeFetchArtifacts(
+        artifactPaths,
+        { repository, selector, pull_request_number: pull.number },
+        githubData.diff,
+        responseWithoutPath,
+      );
       progress.complete("artifacts");
 
       if (unresolved.length === 0) {
@@ -191,11 +204,14 @@ export default function addressReviewCommentsExtension(pi: ExtensionAPI): void {
       activeWorkflow = {
         repoRoot: repositoryRoot,
         repository,
-        fetchResponsePath: artifacts.responsePath,
-        diffPath: artifacts.diffPath,
+        artifactDirectory: artifactPaths.directory,
+        commandRequestPath: artifactPaths.commandRequestPath,
+        fetchRequestPath: artifactPaths.fetchRequestPath,
+        fetchResponsePath: artifactPaths.fetchResponsePath,
+        diffPath: artifactPaths.diffPath,
         startCommitShort,
         prNumber: pull.number,
-        startedAt: new Date().toISOString(),
+        startedAt,
         threadIds: unresolved.map((thread) => thread.id),
         active: true,
       };
@@ -204,7 +220,7 @@ export default function addressReviewCommentsExtension(pi: ExtensionAPI): void {
       setToolEnabled(true);
       updateStatus(ctx);
 
-      const summary = summarizeFetch(artifacts.response);
+      const summary = summarizeFetch(response);
       ctx.ui.notify(`Fetched ${unresolved.length} unresolved thread(s) from PR #${pull.number}.`, "info");
       pi.sendUserMessage(makeAgentPrompt(activeWorkflow, summary));
     } catch (error) {

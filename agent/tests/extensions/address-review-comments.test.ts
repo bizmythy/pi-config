@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
+import { readdir, readFile, rm } from "node:fs/promises";
+import path from "node:path";
 import test from "node:test";
 import { parseAddressReviewArgs } from "../../extensions/address-review-comments/args.js";
-import { filterGeneratedDiff } from "../../extensions/address-review-comments/artifacts.js";
+import {
+  createReviewArtifactDirectory,
+  filterGeneratedDiff,
+  writeFetchArtifacts,
+  writeReplyRequest,
+} from "../../extensions/address-review-comments/artifacts.js";
 import {
   fetchGitHubReviewData,
   GitHubClient,
@@ -212,6 +219,63 @@ test("preserves the posted reply when the follow-up resolve mutation fails", asy
     assert.match(error.message, /resolution denied/);
     return true;
   });
+});
+
+test("keeps workflow requests and fetch artifacts in one temporary directory", async () => {
+  const paths = await createReviewArtifactDirectory({
+    arguments: "42",
+    cwd: "/repo",
+    requested_pull_number: 42,
+    started_at: "2026-01-01T00:00:00Z",
+  });
+  try {
+    const response = await writeFetchArtifacts(
+      paths,
+      { repository: "owner/repo", selector: 42, pull_request_number: 42 },
+      "diff --git a/file.ts b/file.ts\n",
+      {
+        repository: "owner/repo",
+        pull_request: {
+          number: 42,
+          title: "Review me",
+          body: "Body",
+          author: "author",
+          base_branch: "main",
+          head_branch: "feature",
+          head_sha: "abc123",
+        },
+        linear_issues: [],
+        review_threads: [],
+      },
+    );
+    const replyRequestPath = await writeReplyRequest(paths.directory, {
+      thread_id: "PRRT/thread=1",
+      comment: "Fixed.",
+      resolve: true,
+    });
+
+    for (const artifactPath of [
+      paths.commandRequestPath,
+      paths.fetchRequestPath,
+      paths.fetchResponsePath,
+      paths.diffPath,
+      replyRequestPath,
+    ]) {
+      assert.equal(path.dirname(artifactPath), paths.directory);
+    }
+    assert.equal(response.authored_diff_path, paths.diffPath);
+    assert.deepEqual(JSON.parse(await readFile(replyRequestPath, "utf8")), {
+      thread_id: "PRRT/thread=1",
+      comment: "Fixed.",
+      resolve: true,
+    });
+    assert.equal(
+      (await readdir(paths.directory)).some((name) => /reply-.+-response\.json/.test(name)),
+      false,
+    );
+  } finally {
+    await rm(paths.directory, { recursive: true, force: true });
+  }
 });
 
 test("filters generated files from the authored diff without dropping normal files", () => {

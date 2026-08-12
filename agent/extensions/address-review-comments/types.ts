@@ -25,6 +25,12 @@ export interface PullRequestRecord {
   head_sha: string;
 }
 
+export interface FetchRequest {
+  repository: string;
+  selector: number | string;
+  pull_request_number: number;
+}
+
 export interface FetchResponse {
   repository: string;
   pull_request: PullRequestRecord;
@@ -47,6 +53,12 @@ export interface ResolvedReviewThread {
   is_resolved: boolean;
 }
 
+export interface ReplyRequest {
+  thread_id: string;
+  comment: string;
+  resolve: boolean;
+}
+
 export interface ReplyResponse {
   thread_id: string;
   reply: ReviewThreadReply;
@@ -56,6 +68,9 @@ export interface ReplyResponse {
 export interface WorkflowState {
   repoRoot: string;
   repository: string;
+  artifactDirectory: string;
+  commandRequestPath: string;
+  fetchRequestPath: string;
   fetchResponsePath: string;
   diffPath: string;
   startCommitShort: string;
