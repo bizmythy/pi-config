@@ -1,5 +1,5 @@
 diff --git a/node_modules/pi-web-access/gemini-api.ts b/node_modules/pi-web-access/gemini-api.ts
-index 654c182..af1c510 100644
+index 6ef1099..bdcd6fd 100644
 --- a/node_modules/pi-web-access/gemini-api.ts
 +++ b/node_modules/pi-web-access/gemini-api.ts
 @@ -6,7 +6,7 @@ const DEFAULT_API_HOST = "https://generativelanguage.googleapis.com";
@@ -12,7 +12,7 @@ index 654c182..af1c510 100644
  interface GeminiApiConfig {
  	geminiApiKey?: unknown;
 diff --git a/node_modules/pi-web-access/video-extract.ts b/node_modules/pi-web-access/video-extract.ts
-index 71d1257..1a4b9a3 100644
+index 127a554..c948b0d 100644
 --- a/node_modules/pi-web-access/video-extract.ts
 +++ b/node_modules/pi-web-access/video-extract.ts
 @@ -32,11 +32,22 @@ const VIDEO_EXTENSIONS: Record<string, string> = {
@@ -62,22 +62,22 @@ index 71d1257..1a4b9a3 100644
 +		?? await tryVideoGeminiWeb(info, effectivePrompt, effectiveModel, signal, attemptErrors);
  
  	if (result) {
- 		const thumbnail = await extractVideoFrame(info.absolutePath);
-@@ -195,8 +208,11 @@ export async function extractVideo(
+ 		if (canAttachImages()) {
+@@ -197,8 +210,11 @@ export async function extractVideo(
  		return null;
  	}
  
 -	activityMonitor.logError(activityId, "all video extraction paths failed");
 -	return null;
 +	const error = attemptErrors.length > 0
-+		? ["Could not analyze local video.", "", ...attemptErrors.map((message) => `- ${message}`)].join("\n")
++		? ["Could not analyze local video.", "", ...attemptErrors.map(message => `- ${message}`)].join("\n")
 +		: `Video analysis requires Gemini access. Either:\n  1. Sign into gemini.google.com in Chrome (free, uses cookies)\n  2. Set GEMINI_API_KEY in ${CONFIG_PATH}`;
 +	activityMonitor.logError(activityId, error);
 +	return { url: info.absolutePath, title: "", content: "", error };
  }
  
  function mapFfprobeError(err: unknown): string {
-@@ -240,6 +256,7 @@ async function tryVideoGeminiWeb(
+@@ -242,6 +258,7 @@ async function tryVideoGeminiWeb(
  	prompt: string,
  	model: string,
  	signal?: AbortSignal,
@@ -85,7 +85,7 @@ index 71d1257..1a4b9a3 100644
  ): Promise<ExtractedContent | null> {
  	try {
  		const cookies = await isGeminiWebAvailable();
-@@ -261,15 +278,22 @@ async function tryVideoGeminiWeb(
+@@ -263,15 +280,22 @@ async function tryVideoGeminiWeb(
  		};
  	} catch (err) {
  		if (shouldRethrow(err)) throw err;
@@ -96,7 +96,7 @@ index 71d1257..1a4b9a3 100644
  
 +function videoModelsToTry(preferred: string): string[] {
 +	const models = [preferred, ...VIDEO_MODEL_FALLBACKS];
-+	return [...new Set(models.map((candidate) => candidate.trim()).filter(Boolean))];
++	return [...new Set(models.map(candidate => candidate.trim()).filter(Boolean))];
 +}
 +
  async function tryVideoGeminiApi(
@@ -108,7 +108,7 @@ index 71d1257..1a4b9a3 100644
  ): Promise<ExtractedContent | null> {
  	const apiKey = await getApiKey(signal);
  	if (!apiKey) return null;
-@@ -282,22 +306,33 @@ async function tryVideoGeminiApi(
+@@ -284,22 +308,33 @@ async function tryVideoGeminiApi(
  
  		await pollFileState(fileName, apiKey, signal, 120000);
  
@@ -156,10 +156,10 @@ index 71d1257..1a4b9a3 100644
  	} finally {
  		if (fileName) deleteGeminiFile(fileName, apiKey);
 diff --git a/node_modules/pi-web-access/youtube-extract.ts b/node_modules/pi-web-access/youtube-extract.ts
-index 9452700..d61fd46 100644
+index da7b480..5775a56 100644
 --- a/node_modules/pi-web-access/youtube-extract.ts
 +++ b/node_modules/pi-web-access/youtube-extract.ts
-@@ -48,7 +48,7 @@ function normalizeEnabled(value: unknown, fallback: boolean): boolean {
+@@ -49,7 +49,7 @@ function normalizeEnabled(value: unknown, fallback: boolean): boolean {
  	return typeof value === "boolean" ? value : fallback;
  }
  
