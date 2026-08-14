@@ -16,6 +16,9 @@ agent/transcriptions/
 # usage tracking, not helpful
 exa-usage.json
 
+# web search cache
+web-search-cache/
+
 # Common local-only files.
 .env
 .env.*
