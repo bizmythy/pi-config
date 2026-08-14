@@ -10,6 +10,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { MODEL, saveTranscript, type TranscriptionResult, transcribeAudio } from "./core.js";
+import { probeAudioFile } from "./ffprobe.js";
 
 const SECRETS_FILE = join(homedir(), ".pi", "secrets", "personal.json");
 const OUTPUT_DIR = join(homedir(), ".pi", "agent", "transcriptions");
@@ -44,6 +45,9 @@ function resultMessage(result: TranscriptionResult): string {
     `Output: ${result.outputPath}`,
     `Model: ${MODEL}`,
   ];
+  lines.push(
+    `Validated media: ${result.probe.formatNames.join(", ")} (${result.probe.audioCodecs.join(", ") || "audio"})`,
+  );
   if (result.languages.length > 0) lines.push(`Detected language(s): ${result.languages.join(", ")}`);
   lines.push("", "Transcript:", preview.content || "(No speech detected.)");
   if (preview.truncated) {
@@ -60,7 +64,7 @@ export default function transcribeAudioExtension(pi: ExtensionAPI) {
     name: "transcribe_audio",
     label: "Transcribe Audio",
     description:
-      "Transcribe spoken-word audio with OpenAI gpt-transcribe. Accepts mp3, mp4, mpeg, mpga, m4a, wav, or webm files up to 25 MB, accepts optional recording context, and saves the complete transcript under ~/.pi/agent/transcriptions/.",
+      "Transcribe spoken-word audio with OpenAI gpt-transcribe. Accepts real audio in mp3, mp4, mpeg, mpga, m4a, wav, or webm files up to 25 MB, supports optional context for transcription accuracy, and saves the complete transcript under ~/.pi/agent/transcriptions/.",
     promptSnippet: "Transcribe a spoken-word audio recording to a saved text file",
     promptGuidelines: [
       "Use transcribe_audio when the user asks to transcribe a voice memo or another spoken-word recording; include relevant proper nouns or specialized vocabulary in its prompt when available.",
@@ -78,6 +82,8 @@ export default function transcribeAudioExtension(pi: ExtensionAPI) {
         signal,
         secretsFile: SECRETS_FILE,
         outputDir: OUTPUT_DIR,
+        probeImpl: (inputPath, probeSignal) =>
+          probeAudioFile((command, args, options) => pi.exec(command, args, options), inputPath, probeSignal),
         saveOutput: (outputPath, outputDir, text) =>
           withFileMutationQueue(outputPath, () => saveTranscript(outputPath, outputDir, text)),
       });
@@ -89,6 +95,7 @@ export default function transcribeAudioExtension(pi: ExtensionAPI) {
           model: MODEL,
           languages: result.languages,
           audioBytes: result.sizeBytes,
+          media: result.probe,
         },
       };
     },

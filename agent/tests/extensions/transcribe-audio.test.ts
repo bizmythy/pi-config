@@ -5,6 +5,12 @@ import { basename, join } from "node:path";
 import test from "node:test";
 import { transcribeAudio } from "../../extensions/transcribe-audio/core.js";
 
+const VALID_PROBE = {
+  formatNames: ["wav"],
+  audioCodecs: ["pcm_s16le"],
+  durationSeconds: 1,
+};
+
 test("transcription uploads the requested audio and context, then saves the complete transcript", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-transcribe-audio-"));
   const project = join(root, "project");
@@ -35,6 +41,7 @@ test("transcription uploads the requested audio and context, then saves the comp
       secretsFile,
       outputDir,
       fetchImpl,
+      probeImpl: async () => VALID_PROBE,
       now: new Date("2026-08-14T12:34:56.789Z"),
     });
 
@@ -75,12 +82,42 @@ test("transcription rejects unsupported input before sending credentials to the 
         path: inputPath,
         secretsFile: join(root, "missing-personal.json"),
         outputDir: join(root, "output"),
+        probeImpl: async () => VALID_PROBE,
         fetchImpl: async () => {
           called = true;
           return new Response();
         },
       }),
       /Unsupported audio format \.txt/,
+    );
+    assert.equal(called, false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("transcription stops before reading credentials or calling OpenAI when media validation fails", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-transcribe-audio-"));
+  const audioPath = join(root, "fake.wav");
+  await writeFile(audioPath, "not actually audio");
+  let called = false;
+
+  try {
+    await assert.rejects(
+      transcribeAudio({
+        cwd: root,
+        path: audioPath,
+        secretsFile: join(root, "missing-personal.json"),
+        outputDir: join(root, "output"),
+        probeImpl: async () => {
+          throw new Error(`ffprobe found no audio stream in ${audioPath}.`);
+        },
+        fetchImpl: async () => {
+          called = true;
+          return new Response();
+        },
+      }),
+      /ffprobe found no audio stream/,
     );
     assert.equal(called, false);
   } finally {
@@ -103,6 +140,7 @@ test("OpenAI API failures are actionable and do not create a transcript", async 
         path: audioPath,
         secretsFile,
         outputDir,
+        probeImpl: async () => VALID_PROBE,
         fetchImpl: async () =>
           new Response(JSON.stringify({ error: { message: "The uploaded file is invalid." } }), { status: 400 }),
       }),

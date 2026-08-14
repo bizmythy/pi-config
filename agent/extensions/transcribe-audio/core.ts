@@ -1,20 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { basename, extname, join, parse, resolve } from "node:path";
+import { basename, join, parse, resolve } from "node:path";
+import { type AudioProbe, getSupportedMediaType } from "./ffprobe.js";
 
 export const MODEL = "gpt-transcribe";
 export const MAX_AUDIO_BYTES = 25 * 1024 * 1024;
 const TRANSCRIPTIONS_URL = "https://api.openai.com/v1/audio/transcriptions";
-
-const MEDIA_TYPES = new Map([
-  [".mp3", "audio/mpeg"],
-  [".mp4", "audio/mp4"],
-  [".mpeg", "audio/mpeg"],
-  [".mpga", "audio/mpeg"],
-  [".m4a", "audio/mp4"],
-  [".wav", "audio/wav"],
-  [".webm", "audio/webm"],
-]);
 
 type PersonalSecrets = {
   openai?: {
@@ -31,6 +22,8 @@ type FetchImplementation = (input: string | URL | Request, init?: RequestInit) =
 
 type SaveOutput = (outputPath: string, outputDir: string, text: string) => Promise<void>;
 
+type ProbeImplementation = (inputPath: string, signal?: AbortSignal) => Promise<AudioProbe>;
+
 export type TranscriptionOptions = {
   cwd: string;
   path: string;
@@ -39,6 +32,7 @@ export type TranscriptionOptions = {
   secretsFile: string;
   outputDir: string;
   fetchImpl?: FetchImplementation;
+  probeImpl: ProbeImplementation;
   saveOutput?: SaveOutput;
   now?: Date;
 };
@@ -49,6 +43,7 @@ export type TranscriptionResult = {
   text: string;
   languages: string[];
   sizeBytes: number;
+  probe: AudioProbe;
 };
 
 export function normalizeInputPath(cwd: string, path: string): string {
@@ -119,13 +114,8 @@ export async function saveTranscript(outputPath: string, outputDir: string, text
 
 export async function transcribeAudio(options: TranscriptionOptions): Promise<TranscriptionResult> {
   const inputPath = normalizeInputPath(options.cwd, options.path);
-  const extension = extname(inputPath).toLowerCase();
-  const mediaType = MEDIA_TYPES.get(extension);
-  if (!mediaType) {
-    throw new Error(
-      `Unsupported audio format ${extension || "(none)"}. Supported formats: ${[...MEDIA_TYPES.keys()].join(", ")}.`,
-    );
-  }
+  const mediaType = getSupportedMediaType(inputPath);
+  const probe = await options.probeImpl(inputPath, options.signal);
 
   let audio: Buffer;
   try {
@@ -184,5 +174,6 @@ export async function transcribeAudio(options: TranscriptionOptions): Promise<Tr
     text: payload.text,
     languages: normalizeLanguages(payload.languages),
     sizeBytes: audio.byteLength,
+    probe,
   };
 }
