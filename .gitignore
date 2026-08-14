@@ -11,6 +11,7 @@ secrets/*.json
 agent/sessions/
 agent/plans/
 agent/browser-logs/
+agent/transcriptions/
 
 # usage tracking, not helpful
 exa-usage.json
