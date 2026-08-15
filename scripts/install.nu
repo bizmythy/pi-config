@@ -7,7 +7,7 @@
 # - applies patch-package patches from ./patches via Bun's postinstall
 # - applies patch-package patches from ./agent/patches to Pi-managed npm packages
 # - updates/installs Pi-managed npm packages with Bun from agent/settings.json
-# - creates isolated work/personal Pi login profiles (existing logins become personal; work uses Azure)
+# - creates isolated work/personal Pi login profiles (existing logins become personal)
 # - generates local secret files from the committed 1Password templates
 # - verifies that the Linear CLI is authenticated
 # - verifies that Neovim is available for the embedded prompt editor

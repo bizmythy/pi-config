@@ -131,9 +131,7 @@ function bindProfile(registry: ModelRegistry, profile: ProfileName): void {
 }
 
 function providersFor(profile: ProfileName): string[] {
-  const providers = Object.keys(readJson(profileAuthPath(profile)));
-  if (profile === "work") providers.push("azure-foundry");
-  return providers.sort();
+  return Object.keys(readJson(profileAuthPath(profile))).sort();
 }
 
 function setStatus(ctx: Pick<ExtensionContext, "ui">, profile: ProfileName): void {

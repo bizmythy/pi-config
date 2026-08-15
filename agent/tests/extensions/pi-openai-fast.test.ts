@@ -7,16 +7,16 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import piOpenAIFast, { _test } from "../../extensions/pi-openai-fast/index.js";
 
 test("fast-model support is exact and payload updates are immutable", () => {
-  const configured = [{ provider: "azure-foundry", id: "priority-deployment" }];
+  const configured = [{ provider: "custom", id: "priority-deployment" }];
 
   assert.equal(_test.isFastSupportedModel({ provider: "openai", id: "gpt-5" } as never, configured), true);
   assert.equal(_test.isFastSupportedModel({ provider: "openai-codex", id: "gpt-5.2-pro" } as never, configured), true);
   assert.equal(_test.isFastSupportedModel({ provider: "openai", id: "gpt-5.2-preview" } as never, configured), false);
   assert.equal(
-    _test.isFastSupportedModel({ provider: "azure-foundry", id: "priority-deployment" } as never, configured),
+    _test.isFastSupportedModel({ provider: "custom", id: "priority-deployment" } as never, configured),
     true,
   );
-  assert.equal(_test.isFastSupportedModel({ provider: "azure-foundry", id: "other" } as never, configured), false);
+  assert.equal(_test.isFastSupportedModel({ provider: "custom", id: "other" } as never, configured), false);
 
   const payload = { model: "gpt-5", service_tier: "default", nested: { keep: true } };
   const updated = _test.applyFastServiceTier(payload);

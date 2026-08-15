@@ -1,7 +1,0 @@
-{
-  "resourceId": "proj-dirac-eus2-resource",
-  "projectId": "proj-dirac-eus2",
-  "auth": {
-    "type": "azure-identity"
-  }
-}
