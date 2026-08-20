@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import test from "node:test";
-import { isPlanTargetPath } from "../../extensions/plan-support/paths.js";
+import { isPlanTargetPath } from "../../extensions/plan/paths.js";
 
 const cwd = "/work/project";
 const planDir = "/plans/turn";
