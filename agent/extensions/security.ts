@@ -243,6 +243,19 @@ export default function (pi: ExtensionAPI) {
     new RegExp(String.raw`\bcat\b[^;&|]*(?:>|>>)\s*${protectedShellPath}`),
   ];
 
+  async function confirmCommand(
+    ctx: { ui: { confirm(title: string, message: string): Promise<boolean> } },
+    title: string,
+    command: string,
+  ): Promise<boolean> {
+    pi.events.emit("herdr:blocked", { active: true, label: "Waiting for command confirmation" });
+    try {
+      return await ctx.ui.confirm(title, command);
+    } finally {
+      pi.events.emit("herdr:blocked", { active: false });
+    }
+  }
+
   pi.on("tool_call", async (event, ctx) => {
     if (event.toolName === "bash") {
       const command = event.input.command as string;
@@ -255,7 +268,7 @@ export default function (pi: ExtensionAPI) {
           };
         }
 
-        const ok = await ctx.ui.confirm("Dangerous command: recursive delete", command);
+        const ok = await confirmCommand(ctx, "Dangerous command: recursive delete", command);
 
         if (!ok) {
           return { block: true, reason: "Blocked recursive delete by user" };
@@ -271,7 +284,7 @@ export default function (pi: ExtensionAPI) {
             };
           }
 
-          const ok = await ctx.ui.confirm(`Dangerous command: ${desc}`, command);
+          const ok = await confirmCommand(ctx, `Dangerous command: ${desc}`, command);
 
           if (!ok) {
             return { block: true, reason: `Blocked ${desc} by user` };

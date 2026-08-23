@@ -22,9 +22,14 @@ type ToolCallHandler = (
   },
 ) => Promise<ToolCallResult>;
 
-function registerSecurityHook(): ToolCallHandler {
+function registerSecurityHook(emittedEvents: Array<{ name: string; data: unknown }> = []): ToolCallHandler {
   let handler: ToolCallHandler | undefined;
   const pi = {
+    events: {
+      emit(name: string, data: unknown) {
+        emittedEvents.push({ name, data });
+      },
+    },
     on(event: string, candidate: ToolCallHandler) {
       if (event === "tool_call") handler = candidate;
     },
@@ -95,6 +100,15 @@ test("dangerous commands require an affirmative UI confirmation", async () => {
     "Blocked destructive git reset by user",
   );
   assert.equal(denied.confirmations.length, 1);
+
+  const emittedEvents: Array<{ name: string; data: unknown }> = [];
+  const eventHandler = registerSecurityHook(emittedEvents);
+  const eventContext = context({ hasUI: true, confirm: true });
+  assert.equal(await runBash(eventHandler, "sudo reboot", eventContext.ctx), undefined);
+  assert.deepEqual(emittedEvents, [
+    { name: "herdr:blocked", data: { active: true, label: "Waiting for command confirmation" } },
+    { name: "herdr:blocked", data: { active: false } },
+  ]);
 
   const approved = context({ hasUI: true, confirm: true });
   assert.equal(await runBash(handler, "git reset --hard HEAD", approved.ctx), undefined);
