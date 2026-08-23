@@ -9,11 +9,11 @@
     "ignoreUnknown": true,
     "includes": [
       "**/*.ts",
-      "!bun/**",
-      "!.git/**",
-      "!.pi/**",
-      "!agent/git/**",
-      "!agent/sessions/**",
+      "!bun",
+      "!.git",
+      "!.pi",
+      "!agent/git",
+      "!agent/sessions",
       "!agent/extensions/herdr-agent-state.ts"
     ]
   },
