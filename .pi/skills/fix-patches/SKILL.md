@@ -15,7 +15,7 @@ Work **only** on the portion of `scripts/install.nu` that evaluates patch-packag
 - The Bun workspace patches in `patches/`, applied to `bun/node_modules/`.
 - The Pi-managed package patches in `agent/patches/`, applied to `agent/npm/node_modules/` by `apply-agent-npm-patches`.
 
-Do not run the complete `scripts/install.nu`. Do not investigate or change authentication, secrets, profiles, Linear setup, Pi updates, package reconciliation, type declarations, or final package listing.
+Do not run the complete `scripts/install.nu`. Do not investigate or change authentication, secrets, profiles, Pi updates, package reconciliation, type declarations, or final package listing.
 
 ## Workflow
 

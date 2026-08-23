@@ -9,7 +9,6 @@
 # - updates/installs Pi-managed npm packages with Bun from agent/settings.json
 # - creates isolated work/personal Pi login profiles (existing logins become personal)
 # - generates local secret files from the committed 1Password templates
-# - verifies that the Linear CLI is authenticated
 # - verifies that Neovim is available for the embedded prompt editor
 # - verifies that Pi can resolve the configured packages
 #
@@ -24,11 +23,6 @@ use utils.nu *
 
 def command-exists [cmd: string] {
   not ((which $cmd) | is-empty)
-}
-
-def linear-authenticated [] {
-  let result = (do { ^linear auth whoami } | complete)
-  $result.exit_code == 0
 }
 
 def json-key-paths [value: any prefix: string = ""] {
@@ -214,7 +208,7 @@ def main [
   let personal_template = ($secrets_dir | path join "personal.json.tpl")
   let work_template = ($secrets_dir | path join "work.json.tpl")
 
-  let required_commands = ["bun" "pi" "linear" "nvim"]
+  let required_commands = ["bun" "pi" "nvim"]
   for cmd in $required_commands {
     if not (command-exists $cmd) {
       error make {msg: $"Missing required command `($cmd)`. Install it, ensure it is on PATH, and rerun this script."}
@@ -254,22 +248,6 @@ def main [
     ^op --account $work_account inject --in-file $work_template --out-file $work_secrets --force
   } else {
     say "Work secret file already has the expected keys; skipping 1Password injection"
-  }
-
-  if (linear-authenticated) {
-    say "Linear CLI is authenticated"
-  } else {
-    say "Authenticating Linear CLI"
-    let linear_credential = (open $work_secrets | get linear.credential | into string | str trim)
-    if ($linear_credential | is-empty) {
-      error make {msg: "The generated work secret file contains an empty Linear CLI credential."}
-    }
-
-    $linear_credential | ^linear auth login --plaintext
-
-    if not (linear-authenticated) {
-      error make {msg: "Linear CLI authentication failed."}
-    }
   }
 
   say "Installing Bun dependency workspace and applying patches"

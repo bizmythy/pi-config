@@ -291,7 +291,6 @@ test("keeps workflow requests and fetch artifacts in one temporary directory", a
           head_branch: "feature",
           head_sha: "abc123",
         },
-        linear_issues: [],
         review_threads: [],
       },
     );

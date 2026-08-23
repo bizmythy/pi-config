@@ -92,7 +92,6 @@ You choose the filename. Choose a concise, meaningful, kebab-case summary name b
 
 Examples:
 - \`auth-session-refresh-plan.md\`
-- \`linear-pr-bootstrap-plan.md\`
 - \`storybook-component-docs-plan.md\`
 
 Create or overwrite only that plan file inside the target directory. Do not modify project files. After the plan file is complete, call \`finish_plan\` with the exact path you chose.`;

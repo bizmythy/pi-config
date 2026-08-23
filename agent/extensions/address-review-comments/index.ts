@@ -187,8 +187,6 @@ export default function addressReviewCommentsExtension(pi: ExtensionAPI): void {
         repository,
         github_username: githubUsername,
         pull_request: pull,
-        // The old project-specific backend enriched this with Linear. This global extension is GitHub-only.
-        linear_issues: [],
         review_threads: unresolved,
       };
       const response = await writeFetchArtifacts(

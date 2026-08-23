@@ -35,7 +35,6 @@ export interface FetchResponse {
   repository: string;
   github_username: string;
   pull_request: PullRequestRecord;
-  linear_issues: string[];
   authored_diff_path: string;
   review_threads: ReviewThread[];
 }
