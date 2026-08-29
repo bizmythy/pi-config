@@ -10,6 +10,13 @@
  import { type GrokCliModelConfig, resolveModels } from '../models/catalog.js';
  import { sanitizePayload } from '../payload/sanitize.js';
  import { registerGrokTools } from '../tools/register.js';
+@@ -13,6 +13,5 @@
+ import { registerVisionFeature } from '../vision/register.js';
+ import { grokCliModelHeaders, streamGrokCli } from './stream.js';
+ import { syncGrokTools } from './toolScope.js';
+-import { registerUsageCommand } from './usage.js';
+ 
+ export default function registerGrokCli(pi: ExtensionAPI) {
 @@ -61,15 +61,10 @@
          return credentials.access;
        },
@@ -30,3 +37,11 @@
      } satisfies ProviderConfig['oauth'],
  
      streamSimple: streamGrokCli,
+@@ -103,7 +97,6 @@
+     return sanitizePayload(event.payload as Record<string, unknown>, modelId, sessionId, ctx.cwd);
+   });
+ 
+-  registerUsageCommand(pi);
+ 
+   registerVisionFeature(pi);
+ }
