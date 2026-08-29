@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { _test } from "../../extensions/model-blacklist/filter.js";
-import { MODEL_BLACKLIST } from "../../extensions/model-blacklist/patterns.js";
 
 test("model blacklist removes requested families and version ranges", () => {
   const models = [
@@ -21,12 +20,24 @@ test("model blacklist removes requested families and version ranges", () => {
   );
 });
 
+test("model blacklist exposes only GLM 5.3 Flash from OpenRouter", () => {
+  const models = [
+    { provider: "openrouter", id: "anthropic/claude-opus-4.1" },
+    { provider: "openrouter", id: "z-ai/glm-5.3-flash" },
+    { provider: "z-ai", id: "glm-5.3-flash" },
+  ];
+
+  assert.deepEqual(
+    _test.filterModels(models).map((model) => `${model.provider}/${model.id}`),
+    ["openrouter/z-ai/glm-5.3-flash", "z-ai/glm-5.3-flash"],
+  );
+});
+
 test("blacklist patterns also match provider-qualified ids and display names", () => {
   const patterns = [/^vendor\/hidden$/i, /^Friendly hidden$/i];
   assert.equal(_test.isBlacklisted({ provider: "vendor", id: "hidden" }, patterns), true);
   assert.equal(_test.isBlacklisted({ provider: "vendor", id: "visible", name: "Friendly hidden" }, patterns), true);
   assert.equal(_test.isBlacklisted({ provider: "vendor", id: "visible", name: "Friendly visible" }, patterns), false);
-  assert.equal(MODEL_BLACKLIST.length, 5);
 });
 
 test("runtime patch filters the built-in model snapshot and is idempotent", () => {
