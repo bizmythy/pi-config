@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { parseCodexUsage, windowLabelFromSeconds } from "../extensions/usage/codex.js";
 import { clampPercent, formatMoney, humanizeSeconds } from "../extensions/usage/format.js";
+import { grokBaseUrl, parseGrokMonthlyUsage, parseGrokWeeklyUsage } from "../extensions/usage/grok.js";
 import { applyOpenRouterCredits, parseOpenRouterKeyUsage } from "../extensions/usage/openrouter.js";
 
 const CODEX_PAYLOAD = {
@@ -63,6 +64,36 @@ test("Codex usage parser handles missing or malformed payloads", () => {
   assert.equal(parseCodexUsage({}), null);
   assert.equal(parseCodexUsage({ rate_limit: {}, credits: {} }), null);
   assert.equal(parseCodexUsage({ plan_type: "team" }), null);
+});
+
+test("Grok billing payloads parse monthly and optional weekly usage", () => {
+  const monthly = parseGrokMonthlyUsage({
+    config: {
+      monthlyLimit: { val: 1500000 },
+      used: { val: 450000 },
+      billingPeriodEnd: "2026-09-01T07:00:00.000Z",
+    },
+  });
+  assert.ok(monthly);
+  assert.equal(monthly.limitCredits, 1500000);
+  assert.equal(monthly.usedCredits, 450000);
+  assert.equal(monthly.periodEnd, "2026-09-01T07:00:00.000Z");
+
+  const weekly = parseGrokWeeklyUsage({
+    config: {
+      currentPeriod: { type: "USAGE_PERIOD_TYPE_WEEKLY" },
+      creditUsagePercent: 12.5,
+      billingPeriodEnd: "2026-08-31T07:00:00.000Z",
+    },
+  });
+  assert.ok(weekly);
+  assert.equal(weekly.usedPercent, 12.5);
+
+  assert.equal(parseGrokWeeklyUsage({ config: { currentPeriod: { type: "USAGE_PERIOD_TYPE_DAILY" } } }), null);
+  assert.equal(parseGrokMonthlyUsage({ config: {} }), null);
+  assert.equal(parseGrokMonthlyUsage(null), null);
+  assert.equal(grokBaseUrl(undefined), "https://cli-chat-proxy.grok.com/v1");
+  assert.equal(grokBaseUrl({ baseUrl: "https://proxy.example/v1/" }), "https://proxy.example/v1");
 });
 
 test("OpenRouter key usage parses the auth/key payload", () => {

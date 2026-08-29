@@ -6,6 +6,7 @@ import { BorderedLoader, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { Key, matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { type CodexUsageData, parseCodexUsage } from "./codex.js";
 import { clampPercent, formatMoney, humanizeSeconds } from "./format.js";
+import { type GrokUsageData, grokBaseUrl, parseGrokMonthlyUsage, parseGrokWeeklyUsage } from "./grok.js";
 import { applyOpenRouterCredits, type OpenRouterUsageData, parseOpenRouterKeyUsage } from "./openrouter.js";
 
 const AGENT_DIR = getAgentDir();
@@ -25,13 +26,16 @@ type ProviderResult<T> = { status: "ok"; data: T } | { status: "error"; message:
 interface Snapshot {
   codex: ProviderResult<CodexUsageData> | null;
   openrouter: ProviderResult<OpenRouterUsageData> | null;
+  /** Null when Grok is not available (no valid login). */
+  grok: ProviderResult<GrokUsageData> | null;
   fetchedAt: number;
 }
 
-interface CodexCredentials {
+interface OAuthCredential {
   access: string;
-  accountId: string | null;
   expiresAt: number | null;
+  accountId: string | null;
+  baseUrl: string | null;
   /** Where the credential was resolved from, for error messages. */
   source: string;
 }
@@ -44,33 +48,59 @@ async function readJson(path: string): Promise<unknown> {
   }
 }
 
-function codexCredentialsFrom(auth: unknown, source: string): CodexCredentials | null {
+function oauthFrom(auth: unknown, provider: string, source: string): OAuthCredential | null {
   const providers = auth as Record<string, Record<string, unknown>> | null;
-  const codex = providers?.["openai-codex"];
-  if (!codex || typeof codex.access !== "string" || !codex.access) return null;
+  const entry = providers?.[provider];
+  if (!entry || typeof entry.access !== "string" || !entry.access) return null;
   return {
-    access: codex.access,
-    accountId: typeof codex.accountId === "string" ? codex.accountId : null,
-    expiresAt: typeof codex.expires === "number" ? codex.expires : null,
+    access: entry.access,
+    expiresAt: typeof entry.expires === "number" ? entry.expires : null,
+    accountId: typeof entry.accountId === "string" ? entry.accountId : null,
+    baseUrl: typeof entry.baseUrl === "string" ? entry.baseUrl : null,
     source,
   };
 }
 
 /**
- * Resolve the Codex credential downstream of the active auth profile, mirroring
- * the auth-profiles extension: auth-profiles.json names the active profile and
- * auth-profiles/<profile>.json holds its credentials. Falls back to the default
- * auth.json store when no profile is configured.
+ * Resolve an OAuth provider credential downstream of the active auth profile,
+ * mirroring the auth-profiles extension: auth-profiles.json names the active
+ * profile and auth-profiles/<profile>.json holds its credentials. Falls back to
+ * the default auth.json store when no profile is configured.
  */
-async function readCodexCredentials(): Promise<CodexCredentials | null> {
+async function resolveProviderCredential(provider: string): Promise<OAuthCredential | null> {
   const config = (await readJson(AUTH_PROFILES_CONFIG)) as { activeProfile?: unknown } | null;
   const profile = typeof config?.activeProfile === "string" ? config.activeProfile : null;
   if (profile) {
     const profileAuth = await readJson(join(AUTH_PROFILES_DIR, `${profile}.json`));
-    const credentials = codexCredentialsFrom(profileAuth, `auth profile "${profile}"`);
+    const credentials = oauthFrom(profileAuth, provider, `auth profile "${profile}"`);
     if (credentials) return credentials;
   }
-  return codexCredentialsFrom(await readJson(AUTH_FILE), "default auth store");
+  return oauthFrom(await readJson(AUTH_FILE), provider, "default auth store");
+}
+
+function readCodexCredentials(): Promise<OAuthCredential | null> {
+  return resolveProviderCredential("openai-codex");
+}
+
+/**
+ * Grok is only shown when it is actually usable: either the env bypass token is
+ * set, or the active profile holds an unexpired grok-cli login.
+ */
+async function readGrokCredentials(): Promise<OAuthCredential | null> {
+  const envToken = process.env.GROK_CLI_OAUTH_TOKEN;
+  if (envToken?.trim()) {
+    return {
+      access: envToken.trim(),
+      expiresAt: null,
+      accountId: null,
+      baseUrl: null,
+      source: "GROK_CLI_OAUTH_TOKEN",
+    };
+  }
+  const credentials = await resolveProviderCredential("grok-cli");
+  if (!credentials) return null;
+  if (credentials.expiresAt !== null && credentials.expiresAt <= Date.now()) return null;
+  return credentials;
 }
 
 async function readOpenRouterApiKey(): Promise<string | null> {
@@ -144,9 +174,34 @@ async function fetchOpenRouter(signal: AbortSignal | undefined): Promise<Provide
   }
 }
 
+async function fetchGrok(signal: AbortSignal | undefined): Promise<ProviderResult<GrokUsageData> | null> {
+  const credentials = await readGrokCredentials();
+  if (!credentials) return null;
+  const baseUrl = grokBaseUrl({ baseUrl: credentials.baseUrl });
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${credentials.access}`,
+    "x-xai-token-auth": "xai-grok-cli",
+    Accept: "application/json",
+  };
+  try {
+    const monthly = parseGrokMonthlyUsage(await fetchJson(`${baseUrl}/billing`, headers, signal));
+    if (!monthly) return { status: "error", message: "unexpected billing payload" };
+    let weekly = null;
+    try {
+      weekly = parseGrokWeeklyUsage(await fetchJson(`${baseUrl}/billing?format=credits`, headers, signal));
+    } catch {
+      // Weekly usage is optional.
+    }
+    return { status: "ok", data: { baseUrl, monthly, weekly } };
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    return { status: "error", message: error instanceof Error ? error.message : String(error) };
+  }
+}
+
 async function loadSnapshot(signal: AbortSignal | undefined): Promise<Snapshot> {
-  const [codex, openrouter] = await Promise.all([fetchCodex(signal), fetchOpenRouter(signal)]);
-  return { codex, openrouter, fetchedAt: Date.now() };
+  const [codex, openrouter, grok] = await Promise.all([fetchCodex(signal), fetchOpenRouter(signal), fetchGrok(signal)]);
+  return { codex, openrouter, grok, fetchedAt: Date.now() };
 }
 
 function remainingColor(remainingPercent: number): string {
@@ -207,6 +262,35 @@ function snapshotLines(
         const reset = spend.resetAfterSeconds !== null ? `, resets in ${humanizeSeconds(spend.resetAfterSeconds)}` : "";
         lines.push(
           `  ${dim("spend control:")} ${percentColor(theme, remaining, percentLeftText(remaining))} of ${limitText}${reset} ${dim(`(${spend.source})`)}`,
+        );
+      }
+    }
+    lines.push("");
+  }
+
+  const grok = snapshot.grok;
+  if (grok) {
+    lines.push(theme.bold("Grok (x.ai)"));
+    if (grok.status === "error") {
+      lines.push(`  ${dim("unavailable:")} ${theme.fg("error", grok.message)}`);
+    } else {
+      const data = grok.data;
+      const monthly = data.monthly;
+      const monthlyLeft = Math.max(0, monthly.limitCredits - monthly.usedCredits);
+      const monthlyPercent = monthly.limitCredits > 0 ? clampPercent((monthlyLeft / monthly.limitCredits) * 100) : 100;
+      const monthlyReset = humanizeSeconds((new Date(monthly.periodEnd).getTime() - Date.now()) / 1000);
+      lines.push(
+        `  ${muted("monthly")}  ${renderBar(theme, monthlyPercent)}  ${percentColor(theme, monthlyPercent, percentLeftText(monthlyPercent))}${dim(`  resets in ${monthlyReset}`)}`,
+      );
+      lines.push(
+        `  ${dim("credits:")} ${Math.round(monthlyLeft).toLocaleString("en-US")} of ${Math.round(monthly.limitCredits).toLocaleString("en-US")} left`,
+      );
+      const weekly = data.weekly;
+      if (weekly) {
+        const weeklyPercent = 100 - clampPercent(weekly.usedPercent);
+        const weeklyReset = humanizeSeconds((new Date(weekly.periodEnd).getTime() - Date.now()) / 1000);
+        lines.push(
+          `  ${muted("weekly ")}  ${renderBar(theme, weeklyPercent)}  ${percentColor(theme, weeklyPercent, percentLeftText(weeklyPercent))}${dim(`  resets in ${weeklyReset}`)}`,
         );
       }
     }
