@@ -1,0 +1,32 @@
+--- a/node_modules/pi-grok-cli/src/provider/register.ts
++++ b/node_modules/pi-grok-cli/src/provider/register.ts
+@@ -1,7 +1,7 @@
+-import type { Api, Model, OAuthCredentials, OAuthLoginCallbacks } from '@earendil-works/pi-ai';
++import type { OAuthCredentials, OAuthLoginCallbacks } from '@earendil-works/pi-ai';
+ import type { ExtensionAPI, ProviderConfig } from '@earendil-works/pi-coding-agent';
+ import * as oauth from '../auth/oauth.js';
+-import { getBaseUrl, type XaiOAuthCredentials } from '../auth/oauth.js';
++import { getBaseUrl } from '../auth/oauth.js';
+ import { type GrokCliModelConfig, resolveModels } from '../models/catalog.js';
+ import { sanitizePayload } from '../payload/sanitize.js';
+ import { registerGrokTools } from '../tools/register.js';
+@@ -61,15 +61,10 @@
+         return credentials.access;
+       },
+ 
+-      modifyModels(models: Model<Api>[], credentials: OAuthCredentials) {
+-        const effectiveBaseUrl = String(
+-          (credentials as XaiOAuthCredentials).baseUrl ?? getBaseUrl(),
+-        ).replace(/\/+$/, '');
+-
+-        return models.map((m) =>
+-          m.provider === 'grok-cli' ? { ...m, baseUrl: effectiveBaseUrl } : m,
+-        );
+-      },
++      // Keep the fallback catalog static when Grok CLI is not logged in. In the
++      // Pi provider adapter, modifyModels opts the provider into remote catalog
++      // refreshes, which turns an optional expired login into a visible error.
++
+     } satisfies ProviderConfig['oauth'],
+ 
+     streamSimple: streamGrokCli,
