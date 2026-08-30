@@ -3,9 +3,7 @@
   "defaultProvider": "openrouter",
   "defaultModel": "z-ai/glm-5.3-flash",
   "extensions": [],
-  "npmCommand": [
-    "bun"
-  ],
+  "npmCommand": ["bun"],
   "defaultThinkingLevel": "high",
   "packages": [
     "npm:pi-web-access",
