@@ -13,5 +13,8 @@
   "fetch": {
     "answerProvider": "openrouter",
     "answerModel": "z-ai/glm-5.3-flash"
+  },
+  "fetchRouting": {
+    "allowRemoteHostedProviders": true
   }
 }
