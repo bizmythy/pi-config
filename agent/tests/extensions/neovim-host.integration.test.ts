@@ -42,6 +42,7 @@ test("a real embedded Neovim owns editing, state synchronization, and shutdown",
     expect(host.grid.size).toEqual({ width: 50, height: 8 });
     expect(latestDisplayHeight).toBe(1);
     await waitFor(() => host.grid.cursorShape === "vertical");
+    expect(host.mode).toBe("insert");
 
     host.resize(12, 8);
     await waitFor(() => host.grid.size.width === 12);
@@ -61,10 +62,10 @@ test("a real embedded Neovim owns editing, state synchronization, and shutdown",
     expect(host.grid.cursorShape).toBe("block");
 
     host.sendKeys(":");
-    await waitFor(() => host.grid.mode.startsWith("cmdline"));
+    await waitFor(() => host.mode.startsWith("cmdline"));
     expect(host.grid.render(false).join("\n")).toContain(":");
     host.sendKeys("<Esc>");
-    await waitFor(() => host.grid.mode === "normal");
+    await waitFor(() => host.mode === "normal");
 
     await host.setState(["emoji 😀", "second"], 0, 8);
     await waitFor(() => latestText === "emoji 😀\nsecond" && latestDisplayHeight === 2);
@@ -73,24 +74,81 @@ test("a real embedded Neovim owns editing, state synchronization, and shutdown",
 
     await host.setState(["test 1234 hello"], 0, 0);
     host.sendKeys("v");
-    await waitFor(() => host.grid.mode === "visual" && host.grid.cursorShape === "block");
+    await waitFor(() => host.mode === "visual" && host.grid.cursorShape === "block");
     expect(host.grid.cursorShape).toBe("block");
     const visualFrame = host.grid.version;
     host.sendKeys("w");
     await waitFor(() => host.grid.version > visualFrame);
     expect(stripAnsi(host.grid.render(false)[0])).toContain("test 1234 hello");
     host.sendKeys("<Esc>");
-    await waitFor(() => host.grid.mode === "normal");
+    await waitFor(() => host.mode === "normal");
+
+    // Real replace mode must be reported as such (distinct from Neovim's
+    // cursor-obscured "replace" redraw hint, which must never flip the label).
+    host.sendKeys("R");
+    await waitFor(() => host.mode === "replace");
+    host.sendKeys("<Esc>");
+    await waitFor(() => host.mode === "normal");
 
     await host.setText("");
-    await waitFor(() => latestText === "" && host.grid.mode.startsWith("insert"));
+    await waitFor(() => latestText === "" && host.mode === "insert");
     expect(host.grid.cursorShape).toBe("vertical");
+    expect(host.mode).toBe("insert");
 
     expect(errors).toEqual([]);
   } finally {
     await host.dispose();
   }
   expect(exitRequests).toBe(0);
+});
+
+test('Neovim\'s cursor-obscured "replace" hint never flips the insert-mode indicator', async () => {
+  if (!Bun.which("nvim")) return;
+
+  let latestText = "";
+  const errors: string[] = [];
+  const host = new NeovimHost({
+    cwd: process.cwd(),
+    args: ["--clean", "--embed"],
+    onState: (state) => {
+      latestText = state.lines.join("\n");
+    },
+    onSubmit: () => undefined,
+    onRequestExit: () => undefined,
+    onError: (message) => errors.push(message),
+    onExit: () => undefined,
+    onRender: () => undefined,
+  });
+  const hints: string[] = [];
+  const originalHandleRedraw = host.grid.handleRedraw.bind(host.grid);
+  host.grid.handleRedraw = (events: unknown[]) => {
+    for (const event of events as unknown[][]) {
+      if (event?.[0] === "mode_change") hints.push(JSON.stringify(event[1]));
+    }
+    originalHandleRedraw(events);
+  };
+
+  try {
+    await host.start(30, 3);
+    expect(host.mode).toBe("insert");
+    await host.setState(["head hear heat heel heed help hello h"], 0, 31);
+    await waitFor(() => latestText.endsWith(" h"));
+
+    // The completion popup opens over the cursor (the grid is too short to
+    // fit it below), so Neovim emits its cursor-obscured `mode_change`
+    // ["replace", 3] hint even though the editor stays in insert mode.
+    hints.length = 0;
+    host.sendKeys("i\x14"); // i_CTRL-N
+    await waitFor(() => hints.some((hint) => hint.includes("replace")));
+    await Bun.sleep(100); // allow the state sync following the hint to land
+    expect(host.mode).toBe("insert");
+
+    host.sendKeys("\x1b\x1b");
+    await waitFor(() => host.mode === "normal");
+    expect(errors).toEqual([]);
+  } finally {
+    await host.dispose();
+  }
 });
 
 test("the prompt viewport never scrolls past the end of the buffer", async () => {

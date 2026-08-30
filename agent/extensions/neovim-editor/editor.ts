@@ -220,7 +220,11 @@ export class NeovimEditor implements EditorComponent {
   }
 
   private renderModeBorder(width: number): string {
-    const mode = this.host.grid.mode;
+    // The mode comes from the host's nvim_get_mode() synchronization, not from
+    // redraw events: Neovim's `mode_change` redraw event also encodes
+    // cursor-obscuring hints, which would flicker the label to REPLACE while
+    // typing in insert mode.
+    const mode = this.host.mode;
     const label = ` ${modeLabel(mode)} `;
     if (visibleWidth(label) >= width) return this.borderColor("─".repeat(Math.max(1, width)));
     const border = this.borderColor("─".repeat(width - visibleWidth(label)));

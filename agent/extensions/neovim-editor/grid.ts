@@ -96,7 +96,6 @@ export class NeovimGrid {
   private cursorGrid = 1;
   private cursorRow = 0;
   private cursorColumn = 0;
-  private currentMode = "normal";
   private cursorStyleEnabled = false;
   private modeInfos: ModeInfo[] = [];
   private modeIndex = 0;
@@ -106,10 +105,6 @@ export class NeovimGrid {
 
   get version(): number {
     return this.frameVersion;
-  }
-
-  get mode(): string {
-    return this.currentMode;
   }
 
   get cursorShape(): "block" | "horizontal" | "vertical" {
@@ -175,7 +170,12 @@ export class NeovimGrid {
         this.modeInfos = Array.isArray(args[1]) ? (args[1] as ModeInfo[]) : [];
         break;
       case "mode_change":
-        this.currentMode = String(args[0] ?? "normal");
+        // Only the index is tracked here, for cursor styling. The event's mode
+        // name must NOT be treated as the editor mode: Neovim reuses it as a
+        // cursor-style hint and reports "replace" whenever the cursor is
+        // obscured by an overlay grid (completion popup, message, ...) even
+        // though the mode did not change. The true mode comes from
+        // nvim_get_mode(), fetched by the host's state synchronization.
         this.modeIndex = Number(args[1] ?? 0);
         break;
       case "flush":

@@ -125,6 +125,13 @@ class NeovimRpc {
 export class NeovimHost {
   readonly grid = new NeovimGrid();
 
+  /**
+   * The editor mode as reported by nvim_get_mode(), refreshed on every state
+   * synchronization. Redraw `mode_change` events are intentionally not used:
+   * Neovim reuses them as cursor-style hints and reports "replace" while the
+   * cursor is obscured by an overlay even in insert mode.
+   */
+  private modeName = "normal";
   private process?: ChildProcessWithoutNullStreams;
   private rpc?: NeovimRpc;
   private state: NeovimEditorState;
@@ -156,6 +163,10 @@ export class NeovimHost {
 
   get isReady(): boolean {
     return this.ready;
+  }
+
+  get mode(): string {
+    return this.modeName;
   }
 
   get text(): string {
@@ -383,12 +394,13 @@ export class NeovimHost {
   private async syncState(): Promise<void> {
     if (!this.rpc || !this.ready) return;
     try {
-      const result = await this.rpc.request<[string[], number, number, boolean, number] | null>("nvim_exec_lua", [
-        GET_STATE_LUA,
-        [],
-      ]);
+      const result = await this.rpc.request<[string[], number, number, boolean, number, string] | null>(
+        "nvim_exec_lua",
+        [GET_STATE_LUA, []],
+      );
       if (!result) throw new Error("the [Pi Prompt] buffer no longer exists");
-      const [lines, cursorLine, byteColumn, active, displayHeight] = result;
+      const [lines, cursorLine, byteColumn, active, displayHeight, mode] = result;
+      if (typeof mode === "string" && mode) this.modeName = mode;
       const normalized = lines.length > 0 ? lines : [""];
       const line = normalized[cursorLine] ?? "";
       this.state = {

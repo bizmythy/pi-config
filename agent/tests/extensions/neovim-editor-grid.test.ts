@@ -86,7 +86,7 @@ describe("embedded Neovim line-grid rendering", () => {
     expect(grid.render(false)).not.toContain("\x1b_pi:c\x07");
   });
 
-  test("tracks Neovim cursor shapes across mode changes", () => {
+  test("tracks Neovim cursor shapes across mode changes and ignores mode-name lies", () => {
     const grid = new NeovimGrid();
     grid.handleRedraw([
       [
@@ -96,18 +96,21 @@ describe("embedded Neovim line-grid rendering", () => {
           [
             { cursor_shape: "block", cell_percentage: 100 },
             { cursor_shape: "vertical", cell_percentage: 25 },
+            { cursor_shape: "block", cell_percentage: 100 },
           ],
         ],
       ],
       ["mode_change", ["insert", 1]],
       ["flush", []],
     ]);
-    expect(grid.mode).toBe("insert");
     expect(grid.cursorShape).toBe("vertical");
     expect(grid.cursorCellPercentage).toBe(25);
 
+    // Neovim emits this "replace" index purely as a cursor-obscured style
+    // hint while the editor stays in insert mode. The grid must keep using it
+    // for cursor styling only; the mode label is sourced from nvim_get_mode().
     grid.handleRedraw([
-      ["mode_change", ["normal", 0]],
+      ["mode_change", ["replace", 2]],
       ["flush", []],
     ]);
     expect(grid.cursorShape).toBe("block");
