@@ -189,7 +189,6 @@ def main [
   let work_secrets = ($secrets_dir | path join "work.json")
   # Account UUIDs reported by `op account list --format=json`.
   let personal_account = "XH4EFF5WXBGXJOIXZG4PLGILIE"
-  let work_account = "MHSAC4QES5HYTEKXKZQN27PFXQ"
 
   say $"Pi config repo: ($repo)"
 
@@ -241,13 +240,6 @@ def main [
     ^op --account $personal_account inject --in-file $personal_template --out-file $personal_secrets --force
   } else {
     say "Personal secret file already has the expected keys; skipping 1Password injection"
-  }
-
-  if $inject_work {
-    say "Generating work secret file"
-    ^op --account $work_account inject --in-file $work_template --out-file $work_secrets --force
-  } else {
-    say "Work secret file already has the expected keys; skipping 1Password injection"
   }
 
   say "Installing Bun dependency workspace and applying patches"
