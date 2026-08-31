@@ -20,6 +20,27 @@ test("model blacklist removes requested families and version ranges", () => {
   );
 });
 
+test("model blacklist removes claude models below major version 5", () => {
+  const models = [
+    { provider: "claude-bridge", id: "claude-fable-5" },
+    { provider: "claude-bridge", id: "claude-opus-5" },
+    { provider: "claude-bridge", id: "claude-sonnet-5" },
+    { provider: "claude-bridge", id: "claude-opus-4-8" },
+    { provider: "claude-bridge", id: "claude-opus-4-7" },
+    { provider: "claude-bridge", id: "claude-opus-4-6" },
+    { provider: "claude-bridge", id: "claude-sonnet-4-6" },
+    { provider: "claude-bridge", id: "claude-haiku-4-5" },
+    { provider: "anthropic", id: "claude-opus-4-1-20250805" },
+    { provider: "anthropic", id: "claude-3-7-sonnet-20250219" },
+    { provider: "anthropic", id: "claude-haiku-4-5" },
+  ];
+
+  assert.deepEqual(
+    _test.filterModels(models).map((model) => model.id),
+    ["claude-fable-5", "claude-opus-5", "claude-sonnet-5"],
+  );
+});
+
 test("model blacklist exposes only GLM 5.3 Flash from OpenRouter", () => {
   const models = [
     { provider: "openrouter", id: "anthropic/claude-opus-4.1" },
