@@ -14,7 +14,8 @@
       "skills": [],
       "prompts": []
     },
-    "npm:pi-grok-cli@0.3.2"
+    "npm:pi-grok-cli@0.3.2",
+    "npm:pi-claude-bridge"
   ],
   "theme": "catppuccin-mocha",
   "hideThinkingBlock": true,
