@@ -8,7 +8,7 @@
 # - applies patch-package patches from ./agent/patches to Pi-managed npm packages
 # - updates/installs Pi-managed npm packages with Bun from agent/settings.json
 # - creates isolated work/personal Pi login profiles (existing logins become personal)
-# - generates local secret files from the committed 1Password templates
+# - generates the local personal secret file from its committed 1Password template
 # - verifies that Neovim is available for the embedded prompt editor
 # - verifies that Pi can resolve the configured packages
 #
@@ -186,7 +186,6 @@ def main [
   let agent_dir = ($repo | path join "agent")
   let secrets_dir = ($repo | path join "secrets")
   let personal_secrets = ($secrets_dir | path join "personal.json")
-  let work_secrets = ($secrets_dir | path join "work.json")
   # Account UUIDs reported by `op account list --format=json`.
   let personal_account = "XH4EFF5WXBGXJOIXZG4PLGILIE"
 
@@ -205,7 +204,6 @@ def main [
   }
 
   let personal_template = ($secrets_dir | path join "personal.json.tpl")
-  let work_template = ($secrets_dir | path join "work.json.tpl")
 
   let required_commands = ["bun" "pi" "nvim"]
   for cmd in $required_commands {
@@ -228,9 +226,8 @@ def main [
   }
 
   let inject_personal = ($force_inject or not (secret-keys-match $personal_template $personal_secrets))
-  let inject_work = ($force_inject or not (secret-keys-match $work_template $work_secrets))
-  if ($inject_personal or $inject_work) and not (command-exists "op") {
-    error make {msg: "Missing required command `op`; at least one secret file needs to be generated."}
+  if $inject_personal and not (command-exists "op") {
+    error make {msg: "Missing required command `op`; the personal secret file needs to be generated."}
   }
 
   setup-auth-profiles $agent_dir
