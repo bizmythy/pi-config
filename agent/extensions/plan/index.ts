@@ -10,7 +10,8 @@ import { isPlanTargetPath } from "./paths.js";
 import { makeImplementPrompt, makePlanPrompt } from "./prompt.js";
 import { type PersistedPlanExtensionState, type PlanState, restorePlanExtensionState } from "./state.js";
 
-const PLANS_ROOT = path.join(homedir(), "pCloudDrive", "pi-agent", "plans");
+const PCLOUD_PLANS_ROOT = path.join(homedir(), "pCloudDrive", "pi-agent", "plans");
+const FALLBACK_PLANS_ROOT = path.join(homedir(), ".pi", "agent", "plans");
 const MAX_PLAN_CHOICES = 20;
 const FINISH_PLAN_TOOL_NAME = "finish_plan";
 
@@ -27,27 +28,42 @@ function timestamp(): string {
   return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}-${pad(d.getMilliseconds(), 3)}`;
 }
 
-async function ensurePlansRootExists(): Promise<void> {
+/**
+ * Resolve the plans root: prefer the pCloud-synced directory when pCloud is
+ * mounted, otherwise fall back to a gitignored directory under ~/.pi.
+ */
+async function resolvePlansRoot(): Promise<string> {
   try {
-    const rootStat = await stat(PLANS_ROOT);
+    const pCloudDrive = path.join(homedir(), "pCloudDrive");
+    const driveStat = await stat(pCloudDrive);
+    if (driveStat.isDirectory()) return PCLOUD_PLANS_ROOT;
+  } catch {}
+  return FALLBACK_PLANS_ROOT;
+}
+
+async function ensurePlansRootExists(root: string): Promise<void> {
+  try {
+    const rootStat = await stat(root);
     if (!rootStat.isDirectory()) {
-      throw new Error(`Plan path exists but is not a directory: ${PLANS_ROOT}`);
+      throw new Error(`Plan path exists but is not a directory: ${root}`);
     }
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      throw new Error(`Plan directory does not exist: ${PLANS_ROOT}`);
+      await mkdir(root, { recursive: true });
+      return;
     }
     throw error;
   }
 }
 
 async function listPlanFiles(): Promise<PlanFile[]> {
-  await ensurePlansRootExists();
-  const dirs = await readdir(PLANS_ROOT);
+  const plansRoot = await resolvePlansRoot();
+  await ensurePlansRootExists(plansRoot);
+  const dirs = await readdir(plansRoot);
 
   const plans: PlanFile[] = [];
   for (const dirname of dirs) {
-    const dir = path.join(PLANS_ROOT, dirname);
+    const dir = path.join(plansRoot, dirname);
     let dirStat: Awaited<ReturnType<typeof stat>>;
     try {
       dirStat = await stat(dir);
@@ -184,7 +200,8 @@ export default function planExtension(pi: ExtensionAPI) {
   });
 
   pi.registerCommand("plan", {
-    description: "Create a file-backed plan in ~/pCloudDrive/pi-agent/plans/<timestamp>/",
+    description:
+      "Create a file-backed plan in ~/pCloudDrive/pi-agent/plans/<timestamp>/ (falls back to ~/.pi/agent/plans when pCloud is unavailable)",
     getArgumentCompletions: () => null,
     handler: async (args, ctx) => {
       const description = args.trim();
@@ -197,11 +214,12 @@ export default function planExtension(pi: ExtensionAPI) {
         return;
       }
 
-      await ensurePlansRootExists();
+      const plansRoot = await resolvePlansRoot();
+      await ensurePlansRootExists(plansRoot);
 
       const createdAt = timestamp();
-      const dir = path.join(PLANS_ROOT, createdAt);
-      await mkdir(dir);
+      const dir = path.join(plansRoot, createdAt);
+      await mkdir(dir, { recursive: true });
 
       activePlan = { dir, description, createdAt };
       planningInProgress = true;
@@ -228,7 +246,7 @@ export default function planExtension(pi: ExtensionAPI) {
 
       const plans = (await listPlanFiles()).slice(0, MAX_PLAN_CHOICES);
       if (plans.length === 0) {
-        ctx.ui.notify(`No plans found in ${PLANS_ROOT}`, "warning");
+        ctx.ui.notify(`No plans found in ${await resolvePlansRoot()}`, "warning");
         return;
       }
 
