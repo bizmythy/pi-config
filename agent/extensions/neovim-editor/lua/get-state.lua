@@ -3,6 +3,15 @@ if not buffer or not vim.api.nvim_buf_is_valid(buffer) then
   return nil
 end
 
+-- Re-pin the viewport before reading state: text changes that shrink the last
+-- line (and other view drift) leave '~' filler rows below the buffer end that
+-- no WinScrolled event announces. Normalizing here, on every synchronization,
+-- keeps the bottom row of the editor filled at all times.
+local normalize = _G.pi_normalize_prompt_viewport
+if type(normalize) == "function" then
+  normalize()
+end
+
 -- The UI protocol's `mode_change` event doubles as a cursor-style hint: when
 -- the cursor is obscured by an overlay grid (completion popup, message, ...)
 -- Neovim reports the "replace" cursor shape even though the mode did not

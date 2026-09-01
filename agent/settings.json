@@ -1,7 +1,7 @@
 {
   "lastChangelogVersion": "0.84.2",
-  "defaultProvider": "openrouter",
-  "defaultModel": "z-ai/glm-5.3-flash",
+  "defaultProvider": "openai-codex",
+  "defaultModel": "gpt-5.6-sol",
   "extensions": [],
   "npmCommand": [
     "bun"

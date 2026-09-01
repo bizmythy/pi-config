@@ -8,4 +8,9 @@ vim.api.nvim_buf_set_text(buffer, row, byte_col, row, byte_col, replacement)
 if vim.api.nvim_get_current_buf() == buffer then
   vim.api.nvim_win_set_cursor(0, { target_row + 1, target_byte_col })
 end
+-- Re-pin the viewport so the edit never renders '~' filler rows.
+local normalize = _G.pi_normalize_prompt_viewport
+if type(normalize) == "function" then
+  normalize()
+end
 return true

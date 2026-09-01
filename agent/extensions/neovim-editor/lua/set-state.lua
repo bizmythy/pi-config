@@ -11,4 +11,9 @@ if vim.api.nvim_get_current_buf() == buffer then
     vim.cmd.startinsert()
   end
 end
+-- Re-pin the viewport so the replaced buffer never renders '~' filler rows.
+local normalize = _G.pi_normalize_prompt_viewport
+if type(normalize) == "function" then
+  normalize()
+end
 return true

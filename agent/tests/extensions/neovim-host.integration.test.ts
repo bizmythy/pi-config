@@ -151,6 +151,87 @@ test('Neovim\'s cursor-obscured "replace" hint never flips the insert-mode indic
   }
 });
 
+test("the editor bottom stays filled: no '~' filler rows below the buffer end", async () => {
+  if (!Bun.which("nvim")) return;
+
+  const errors: string[] = [];
+  const host = new NeovimHost({
+    cwd: process.cwd(),
+    args: ["--clean", "--embed"],
+    onState: () => undefined,
+    onSubmit: () => undefined,
+    onRequestExit: () => undefined,
+    onError: (message) => errors.push(message),
+    onExit: () => undefined,
+    onRender: () => undefined,
+  });
+  // Trailing rows Neovim paints with its '~' end-of-buffer marker are wasted
+  // prompt space and must never render. The viewport normalization runs inside
+  // Neovim before the redraw flush, so filler should never even reach the grid.
+  const fillerRows = () => {
+    const rows = host.grid.render(false).map(stripAnsi);
+    let dead = 0;
+    for (let i = rows.length - 1; i >= 0; i--) {
+      if (rows[i].trimStart().startsWith("~")) dead++;
+      else break;
+    }
+    return dead;
+  };
+  const makeLines = async (count: number): Promise<string[]> => {
+    const lines: string[] = [];
+    for (let i = 0; i < count; i++) lines.push(`L${i + 1} ${"word ".repeat(17)}`.trimEnd());
+    lines.push(""); // empty cursor line, like a real prompt
+    return lines;
+  };
+  // The editor resizes the grid to min(wrapped content height, viewport cap)
+  // on every render; mirror that here.
+  const syncBox = (cap = 15) => host.resize(80, Math.min(host.editorState.displayHeight, cap));
+
+  try {
+    await host.start(80, 12);
+    await host.setState(await makeLines(40), 40, 0);
+    await waitFor(() => fillerRows() === 0);
+
+    // Window growth keeps the old view top and would expose filler rows.
+    for (const height of [13, 14, 15]) {
+      host.resize(80, height);
+      await waitFor(() => fillerRows() === 0);
+    }
+
+    // Shrink then regrow.
+    host.resize(80, 12);
+    await waitFor(() => fillerRows() === 0);
+    host.resize(80, 15);
+    await waitFor(() => fillerRows() === 0);
+
+    // zt pulls the cursor line to the window top: maximal filler below.
+    host.sendKeys("<Esc>zt");
+    await waitFor(() => fillerRows() === 0);
+
+    // Scroll up, then back to the end.
+    host.sendKeys("<Esc>5<C-u>G");
+    await waitFor(() => fillerRows() === 0);
+
+    // Shrinking the wrapped last line leaves filler with no WinScrolled event;
+    // the state synchronization must re-pin the viewport.
+    host.sendKeys("i");
+    await Bun.sleep(100);
+    host.sendKeys("tail text that is quite long and will definitely wrap around the window edge several times here ok");
+    await waitFor(() => fillerRows() === 0);
+    for (let i = 0; i < 14; i++) host.sendKeys("<C-w>");
+    await waitFor(() => fillerRows() === 0);
+
+    // Full buffer replacement with far fewer lines; the box shrinks with it.
+    await host.setState(await makeLines(6), 6, 0);
+    syncBox();
+    await waitFor(() => fillerRows() === 0);
+
+    expect(errors).toEqual([]);
+  } finally {
+    await host.dispose();
+  }
+});
+
 test("the prompt viewport never scrolls past the end of the buffer", async () => {
   if (!Bun.which("nvim")) return;
 
