@@ -89,10 +89,6 @@ test("starts diff and review-thread requests concurrently", async () => {
   const threads = deferred<ExecResult>();
   const started: string[] = [];
   const exec: CommandExecutor = async (_command, args) => {
-    if (args[0] === "pr" && args[1] === "diff") {
-      started.push("diff");
-      return diff.promise;
-    }
     if (args[0] === "api" && args[1] === "graphql") {
       started.push("threads");
       return threads.promise;
@@ -100,7 +96,10 @@ test("starts diff and review-thread requests concurrently", async () => {
     throw new Error(`Unexpected gh call: ${args.join(" ")}`);
   };
 
-  const request = fetchGitHubReviewData(new GitHubClient(exec, "/repo"), "owner/repo", 42);
+  const request = fetchGitHubReviewData(new GitHubClient(exec, "/repo"), "owner/repo", 42, async () => {
+    started.push("diff");
+    return (await diff.promise).stdout;
+  });
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(started.sort(), ["diff", "threads"]);
 

@@ -247,10 +247,6 @@ export class GitHubClient {
     };
   }
 
-  async fetchPullDiff(repository: string, pullNumber: number, signal?: AbortSignal): Promise<string> {
-    return this.gh(["pr", "diff", String(pullNumber), "--repo", repository], { signal });
-  }
-
   private async fetchAdditionalComments(
     threadId: string,
     cursor: string,
@@ -394,11 +390,12 @@ export async function fetchGitHubReviewData(
   client: GitHubClient,
   repository: string,
   pullNumber: number,
+  loadDiff: () => Promise<string>,
   signal?: AbortSignal,
   onComplete?: (part: "diff" | "threads") => void,
 ): Promise<{ diff: string; threads: ReviewThread[] }> {
   const [diffResult, threadsResult] = await Promise.allSettled([
-    client.fetchPullDiff(repository, pullNumber, signal).then((value) => {
+    loadDiff().then((value) => {
       onComplete?.("diff");
       return value;
     }),

@@ -28,21 +28,19 @@ async function isDirty(exec: CommandExecutor, cwd: string): Promise<boolean> {
   return (await runGit(exec, cwd, ["status", "--porcelain"])) !== "";
 }
 
-export async function checkoutExplicitPull(
+export async function ensurePullCheckout(
   exec: CommandExecutor,
   cwd: string,
   repository: string,
   pullNumber: number,
   expectedHeadBranch: string,
 ): Promise<boolean> {
-  const [branch, dirty] = await Promise.all([currentBranch(exec, cwd), isDirty(exec, cwd)]);
-  if (dirty) {
-    if (branch !== expectedHeadBranch) {
-      throw new Error(
-        `Worktree is dirty; refusing to switch from ${branch} to pull request branch ${expectedHeadBranch}.`,
-      );
-    }
-    return false;
+  const branch = await currentBranch(exec, cwd);
+  if (branch === expectedHeadBranch) return false;
+  if (await isDirty(exec, cwd)) {
+    throw new Error(
+      `Worktree is dirty; refusing to switch from ${branch} to pull request branch ${expectedHeadBranch}.`,
+    );
   }
 
   const result = await exec("gh", ["pr", "checkout", String(pullNumber), "--repo", repository], {
@@ -50,5 +48,24 @@ export async function checkoutExplicitPull(
     timeout: 120_000,
   });
   if (result.code !== 0) throw new Error(`gh pr checkout failed: ${detail(result)}`);
-  return branch !== expectedHeadBranch;
+  return true;
+}
+
+async function resolveBaseCommit(exec: CommandExecutor, cwd: string, baseBranch: string): Promise<string> {
+  for (const ref of [`origin/${baseBranch}`, baseBranch]) {
+    const result = await exec("git", ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`], { cwd, timeout: 30_000 });
+    if (result.code === 0 && result.stdout.trim()) return result.stdout.trim();
+  }
+  const fetched = await exec("git", ["fetch", "origin", baseBranch], { cwd, timeout: 120_000 });
+  if (fetched.code !== 0) throw new Error(`git fetch origin ${baseBranch} failed: ${detail(fetched)}`);
+  return runGit(exec, cwd, ["rev-parse", "FETCH_HEAD"]);
+}
+
+export async function pullRequestDiff(exec: CommandExecutor, cwd: string, baseBranch: string): Promise<string> {
+  const baseCommit = await resolveBaseCommit(exec, cwd, baseBranch);
+  const mergeBase = await runGit(exec, cwd, ["merge-base", baseCommit, "HEAD"]);
+  const args = ["diff", "--no-color", "--no-ext-diff", `${mergeBase}..HEAD`];
+  const result = await exec("git", args, { cwd, timeout: 120_000 });
+  if (result.code !== 0) throw new Error(`git ${args.join(" ")} failed: ${detail(result)}`);
+  return result.stdout;
 }

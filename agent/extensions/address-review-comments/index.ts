@@ -18,7 +18,7 @@ import {
   STATE_ENTRY_TYPE,
   STATUS_ID,
 } from "./constants.js";
-import { checkoutExplicitPull, currentBranch, resolveRepositoryRoot, shortHead } from "./git.js";
+import { currentBranch, ensurePullCheckout, pullRequestDiff, resolveRepositoryRoot, shortHead } from "./git.js";
 import { fetchGitHubReviewData, GitHubClient, GitHubUsernameCache } from "./github.js";
 import { makeAgentPrompt, summarizeFetch } from "./prompt.js";
 import type { FetchResponse, WorkflowState } from "./types.js";
@@ -172,16 +172,21 @@ export default function addressReviewCommentsExtension(pi: ExtensionAPI): void {
       const pull = await client.getPullRequest(repository, selector);
       progress.complete("metadata");
 
-      if (parsed.prNumber !== undefined) {
-        const switched = await checkoutExplicitPull(exec, repositoryRoot, repository, pull.number, pull.head_branch);
-        if (switched) ctx.ui.notify(`Checked out PR branch ${pull.head_branch}.`, "info");
-      }
+      const switched = await ensurePullCheckout(exec, repositoryRoot, repository, pull.number, pull.head_branch);
+      if (switched) ctx.ui.notify(`Checked out PR branch ${pull.head_branch}.`, "info");
       progress.complete("checkout");
 
       const startCommitShort = await shortHead(exec, repositoryRoot);
-      const githubData = await fetchGitHubReviewData(client, repository, pull.number, undefined, (part) => {
-        progress.complete(part);
-      });
+      const githubData = await fetchGitHubReviewData(
+        client,
+        repository,
+        pull.number,
+        () => pullRequestDiff(exec, repositoryRoot, pull.base_branch),
+        undefined,
+        (part) => {
+          progress.complete(part);
+        },
+      );
       const unresolved = githubData.threads.filter((thread) => !thread.is_resolved);
       const responseWithoutPath: Omit<FetchResponse, "authored_diff_path"> = {
         repository,
