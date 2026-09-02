@@ -133,3 +133,27 @@ test("write protection covers secrets and lockfiles while allowing intentional p
     "Protected path: node_modules",
   );
 });
+
+test("git commits may not attribute an AI co-author", async () => {
+  const handler = registerSecurityHook();
+  const approved = context({ hasUI: true, confirm: true });
+
+  const blocked = await runBash(
+    handler,
+    'git commit -m "fix thing\n\nCo-authored-by: Claude <noreply@anthropic.com>"',
+    approved.ctx,
+  );
+  assert.match(blocked?.reason ?? "", /Do not attribute commits to yourself/);
+
+  assert.match(
+    (await runBash(handler, 'git commit -m "feat: x\n\nGenerated with Codex"', approved.ctx))?.reason ?? "",
+    /Do not attribute commits to yourself/,
+  );
+
+  assert.equal(await runBash(handler, 'git commit -m "fix thing"', approved.ctx), undefined);
+  assert.equal(
+    await runBash(handler, 'git commit -m "fix\n\nCo-authored-by: Drew <drew@example.com>"', approved.ctx),
+    undefined,
+  );
+  assert.equal(await runBash(handler, 'echo "Generated with Claude Code"', approved.ctx), undefined);
+});

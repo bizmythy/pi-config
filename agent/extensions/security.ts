@@ -192,6 +192,16 @@ function hasUnsafeRecursiveRm(command: string, cwd: string): boolean {
   return false;
 }
 
+const AI_ATTRIBUTION_PATTERNS = [
+  /co-authored-by:\s*[^\n]*\b(?:claude|codex|copilot|cursor|devin|gemini|chatgpt|openai|anthropic|aider|pi)\b/i,
+  /(?:generated|created|written|co-authored)\s+(?:with|by)\s+[^\n]*\b(?:claude|codex|copilot|cursor|devin|gemini|chatgpt|openai|anthropic|aider)\b/i,
+];
+
+function hasAiAttribution(command: string): boolean {
+  if (!/\bgit\b/.test(command)) return false;
+  return AI_ATTRIBUTION_PATTERNS.some((pattern) => pattern.test(command));
+}
+
 /**
  * Comprehensive security hook:
  * - Blocks dangerous bash commands (rm -rf, sudo, chmod 777, etc.)
@@ -273,6 +283,15 @@ export default function (pi: ExtensionAPI) {
         if (!ok) {
           return { block: true, reason: "Blocked recursive delete by user" };
         }
+      }
+
+      if (hasAiAttribution(command)) {
+        if (ctx.hasUI) ctx.ui.notify("Blocked AI co-author attribution in git command", "warning");
+        return {
+          block: true,
+          reason:
+            "Do not attribute commits to yourself (no Co-authored-by or 'Generated with' trailers naming an AI). Commits are the human author's responsibility. Re-run the command without the attribution.",
+        };
       }
 
       for (const { pattern, desc } of dangerousCommands) {
