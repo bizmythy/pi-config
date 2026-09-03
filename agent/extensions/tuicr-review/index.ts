@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Key, matchesKey, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { readClipboardText } from "../shared/clipboard.js";
 import { latestCustomEntryData } from "../shared/session-entries.js";
 import { commentLabel } from "./labels.js";
 import { parseTuicrReview, type TuicrComment, type TuicrReview } from "./parser.js";
@@ -206,12 +207,9 @@ export default function tuicrReviewExtension(pi: ExtensionAPI) {
         source = resolveReviewPath(argument, ctx.cwd);
         markdown = await readFile(source, "utf8");
       } else {
-        const result = await pi.exec("wl-paste", ["--no-newline"]);
-        if (result.code !== 0) {
-          throw new Error(result.stderr.trim() || `wl-paste exited with status ${result.code}`);
-        }
-        markdown = result.stdout;
-        source = "Wayland clipboard";
+        const clipboard = await readClipboardText((command, args) => pi.exec(command, args));
+        markdown = clipboard.text;
+        source = clipboard.source;
       }
 
       const review = parseTuicrReview(markdown);
@@ -234,7 +232,7 @@ export default function tuicrReviewExtension(pi: ExtensionAPI) {
     getArgumentCompletions: (prefix) => {
       if (/\s/.test(prefix)) return null;
       const subcommands = [
-        { value: "parse", label: "parse", description: "Parse a review from a file or wl-paste" },
+        { value: "parse", label: "parse", description: "Parse a review from a file or the system clipboard" },
         { value: "resume", label: "resume", description: "Select more unaddressed comments" },
       ];
       const matches = subcommands.filter((item) => item.value.startsWith(prefix));
