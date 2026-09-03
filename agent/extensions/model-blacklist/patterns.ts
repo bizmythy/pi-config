@@ -1,6 +1,8 @@
 /** Models matching any of these expressions are omitted from `/model`. */
 export const MODEL_BLACKLIST = [
-  /^gemini-/i,
+  // Gemini: keep only 3.8+ (blacklists 1.x/2.x, 3.0 preview era, 3.0–3.7 point
+  // releases, and rolling -latest aliases). Future 3.9/4.x+ stay visible by default.
+  /gemini-(?!(?:3\.[89]|[4-9]\.\d))/i,
   /^gemma-/i,
   /^deep-research-/i,
   /^grok-(?:[0-3](?:\.\d+)?|4(?:\.[0-4])?(?:$|-))/i,

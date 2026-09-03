@@ -41,6 +41,22 @@
           }
         }
       }
+    },
+    "google-vertex": {
+      "api": "google-vertex",
+      "baseUrl": "https://{location}-aiplatform.googleapis.com",
+      "models": [
+        {
+          "id": "gemini-3.8-flash",
+          "name": "Gemini 3.8 Flash",
+          "reasoning": true,
+          "thinkingLevelMap": { "off": null },
+          "input": ["text", "image"],
+          "cost": { "input": 0.75, "output": 3.75, "cacheRead": 0.075, "cacheWrite": 0 },
+          "contextWindow": 1048576,
+          "maxTokens": 65536
+        }
+      ]
     }
   }
 }
