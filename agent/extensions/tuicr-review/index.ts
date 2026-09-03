@@ -130,7 +130,7 @@ function formatPrompt(comments: TuicrComment[], additionalInformation: string): 
     ? `\n\n## Additional information from the user\n\n${additionalInformation.trim()}`
     : "";
 
-  return `Address the following selected tuicr review comments exactly as described.
+  return `Address the following selected code review comments exactly as described.
 
 Inspect the referenced code and surrounding context, make the necessary changes, and run relevant checks or tests. Address only these selected comments unless another change is strictly required to implement them correctly.
 
