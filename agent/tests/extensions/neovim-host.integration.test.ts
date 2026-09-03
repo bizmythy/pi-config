@@ -130,15 +130,17 @@ test('Neovim\'s cursor-obscured "replace" hint never flips the insert-mode indic
 
   try {
     await host.start(30, 3);
-    expect(host.mode).toBe("insert");
-    await host.setState(["head hear heat heel heed help hello h"], 0, 31);
-    await waitFor(() => latestText.endsWith(" h"));
+    await waitFor(() => host.mode === "insert");
+    await host.setState(["hello"], 0, 5);
+    await waitFor(() => latestText === "hello");
 
-    // The completion popup opens over the cursor (the grid is too short to
-    // fit it below), so Neovim emits its cursor-obscured `mode_change`
-    // ["replace", 3] hint even though the editor stays in insert mode.
+    // A float covering the cursor makes Neovim emit its cursor-obscured
+    // `mode_change` ["replace", 3] hint even though the editor stays in insert
+    // mode. The float is deferred so it lands after the return to insert.
     hints.length = 0;
-    host.sendKeys("i\x14"); // i_CTRL-N
+    const openFloat =
+      "vim.defer_fn(function() local b = vim.api.nvim_create_buf(false, true) vim.api.nvim_open_win(b, false, { relative = 'editor', row = 0, col = 0, width = 30, height = 3, style = 'minimal', zindex = 300 }) end, 100)";
+    host.sendKeys(`<Esc>:lua ${openFloat}<CR>i`);
     await waitFor(() => hints.some((hint) => hint.includes("replace")));
     await Bun.sleep(100); // allow the state sync following the hint to land
     expect(host.mode).toBe("insert");
