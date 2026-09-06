@@ -1,4 +1,4 @@
-My github usernames are @drew-dirac, @bizmythy
+My github username is @drew-council
 
 # TypeScript checks and formatting
 

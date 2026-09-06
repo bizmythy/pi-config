@@ -2,7 +2,7 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     topiary-nushell = {
-      url = "github:bizmythy/topiary-nushell-nix";
+      url = "github:drew-council/topiary-nushell-nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     treefmt-nix = {

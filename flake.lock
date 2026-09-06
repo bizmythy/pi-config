@@ -48,13 +48,13 @@
       "locked": {
         "lastModified": 1786562018,
         "narHash": "sha256-G5JE71DDfwp6nVYC8P8R2SXumVBIeHF9KbECQ1TGSnY=",
-        "owner": "bizmythy",
+        "owner": "drew-council",
         "repo": "topiary-nushell-nix",
         "rev": "ebe8ccad72625d94969e4cc76875ed66ee64e2fe",
         "type": "github"
       },
       "original": {
-        "owner": "bizmythy",
+        "owner": "drew-council",
         "repo": "topiary-nushell-nix",
         "type": "github"
       }
